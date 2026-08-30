@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
     Box,
@@ -18,154 +18,51 @@ import {
     MenuItem,
     Typography,
     Chip,
-    Tooltip,
+    TextField,
+    InputAdornment,
+    Grid,
     useTheme,
     alpha
 } from '@mui/material';
-import { ArrowBackRounded as ArrowBackIcon } from '@mui/icons-material';
+import {
+    Search as SearchIcon,
+    ArrowBackRounded as ArrowBackIcon
+} from '@mui/icons-material';
 import API from '../services/api';
 import Layout from '../components/Layout';
+import CurrencyDisplay from '../components/CurrencyDisplay'; // 👈 المكون الخارجي الموحد
 import { useLanguage } from '../LanguageContext';
-import { getCurrencySymbol, getCurrencyFullName } from '../i18n/currencies';
+import { getCurrencySymbol } from '../i18n/currencies';
+import { formatCurrency } from '../utils/formatters';
 
 const getPaymentStatusMap = (t) => ({
-    0: { label: t.statusUnpaid || 'Unpaid', color: 'warning' },
-    1: { label: t.statusPartial || 'Partially Paid', color: 'info' },
-    2: { label: t.statusPaid || 'Paid', color: 'success' },
-    3: { label: t.statusReturned || 'Returned', color: 'error' },
+    0: { label: t.statusUnpaid || 'غير مدفوع', color: 'warning' },
+    1: { label: t.statusPartial || 'مدفوع جزئياً', color: 'info' },
+    2: { label: t.statusPaid || 'مدفوع', color: 'success' },
+    3: { label: t.statusReturned || 'مرتجع', color: 'error' },
 });
 
 const PaymentStatusChip = ({ statusId, t }) => {
     const statusMap = getPaymentStatusMap(t);
-    const status = statusMap[parseInt(statusId, 10)] || { label: t.statusUnknown || 'Unknown', color: 'default' };
+    const status = statusMap[parseInt(statusId, 10)] || { label: t.statusUnknown || 'غير محدد', color: 'default' };
     return <Chip label={status.label} color={status.color} size="small" variant="filled" sx={{ fontSize: '11px', fontWeight: 700, height: 22 }} />;
 };
 
 const getDeliveryStatusMap = (t) => ({
-    1: { label: t.deliveryReceived || 'Received', color: 'success' },
-    2: { label: t.deliveryRejected || 'Rejected', color: 'error' },
-    3: { label: t.deliveryPending || 'Pending', color: 'warning' },
-    4: { label: t.deliveryPartialReceived || 'Partially Received', color: 'info' },
-    5: { label: t.deliveryPartialRejected || 'Partially Rejected', color: 'default' },
+    1: { label: t.deliveryReceived || 'مُسلَّم', color: 'success' },
+    2: { label: t.deliveryRejected || 'مرفوض', color: 'error' },
+    3: { label: t.deliveryPending || 'تحت التسليم', color: 'warning' },
+    4: { label: t.deliveryPartialReceived || 'مُسلَّم جزئياً', color: 'info' },
+    5: { label: t.deliveryPartialRejected || 'مرفوض جزئياً', color: 'default' },
 });
 
 const DeliveryStatusChip = ({ statusId, t }) => {
     if (statusId === null || statusId === undefined || statusId === 0) {
-        return <Chip label={t.deliveryDirect || 'Immediate'} size="small" variant="outlined" color="primary" sx={{ fontSize: '11px', fontWeight: 600, height: 22 }} />;
+        return <Chip label={t.deliveryDirect || 'تسليم مباشر'} size="small" variant="outlined" color="primary" sx={{ fontSize: '11px', fontWeight: 600, height: 22 }} />;
     }
     const statusMap = getDeliveryStatusMap(t);
-    const status = statusMap[parseInt(statusId, 10)] || { label: t.statusUnknown || 'Unknown', color: 'default' };
+    const status = statusMap[parseInt(statusId, 10)] || { label: t.statusUnknown || 'غير محدد', color: 'default' };
     return <Chip label={status.label} color={status.color} size="small" variant="outlined" sx={{ fontSize: '11px', fontWeight: 600, height: 22 }} />;
-};
-
-const formatCurrency = (val) => {
-    const num = parseFloat(val || 0);
-    return num.toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-};
-
-const CurrencyDisplay = ({
-    amount,
-    baseAmount,
-    currencyCode,
-    baseCurrencyCode,
-    exchangeRate,
-    isUnified = false,
-    displayCurrency,
-    lang,
-    isBold = false,
-    color = 'text.primary',
-    size = 'body2'
-}) => {
-    const activeCurr = (isUnified ? displayCurrency : (baseCurrencyCode || 'EGP')).toUpperCase().trim();
-    const invCurr = (currencyCode || 'EGP').toUpperCase().trim();
-    const rate = parseFloat(exchangeRate || 1);
-
-    // القيمة الأصلية بـ عملة الفاتورة
-    const origVal = parseFloat(amount || 0);
-
-    // القيمة المحولة صراحة بعملة الفرع الأساسية
-    const baseVal = (baseAmount !== undefined && baseAmount !== null && !isNaN(parseFloat(baseAmount)))
-        ? parseFloat(baseAmount)
-        : (origVal * rate);
-
-    // 🎯 شرط كشف العملة الأجنبية: إما باختلاف رمز العملة أو بوجود فرق رقمي بين المبلغان
-    const isForeign = !isUnified && (invCurr !== activeCurr || Math.abs(baseVal - origVal) > 0.01);
-
-    const origFullName = getCurrencyFullName(invCurr, lang);
-    const activeFullName = getCurrencyFullName(activeCurr, lang);
-
-    const origSymbol = getCurrencySymbol(invCurr, lang);
-    const activeSymbol = getCurrencySymbol(activeCurr, lang);
-
-    const fontSize = size === 'caption' ? '11px' : '13px';
-    const subFontSize = size === 'caption' ? '9.5px' : '11px';
-
-    if (!isForeign) {
-        return (
-            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant={size} sx={{ fontSize, fontWeight: isBold ? 700 : 500, color }}>
-                    <bdi>{formatCurrency(origVal)}</bdi>
-                </Typography>
-                <Tooltip title={origFullName} arrow placement="top">
-                    <Typography
-                        component="span"
-                        variant={size}
-                        sx={{
-                            fontSize,
-                            fontWeight: isBold ? 700 : 600,
-                            color: color !== 'text.primary' ? color : 'text.secondary',
-                            cursor: 'pointer',
-                        }}
-                    >
-                        ({origSymbol})
-                    </Typography>
-                </Tooltip>
-            </Box>
-        );
-    }
-
-    const calculatedRate = origVal > 0 ? (baseVal / origVal) : rate;
-    const tooltipTitle = `1 ${origSymbol} = ${formatCurrency(calculatedRate)} ${activeSymbol} (${activeFullName})`;
-
-    return (
-        <Box sx={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1.2 }}>
-            {/* السطر العلوي: القيمة بالعملة الأساسية (EGP) */}
-            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant={size} sx={{ fontSize, fontWeight: isBold ? 700 : 600, color }}>
-                    <bdi>{formatCurrency(baseVal)}</bdi>
-                </Typography>
-                <Tooltip title={activeFullName} arrow placement="top">
-                    <Typography
-                        component="span"
-                        variant={size}
-                        sx={{ fontSize, fontWeight: 700, color: color !== 'text.primary' ? color : 'text.secondary', cursor: 'pointer' }}
-                    >
-                        ({activeSymbol})
-                    </Typography>
-                </Tooltip>
-            </Box>
-
-            {/* السطر السفلي: القيمة الأصلية بالفاتورة ($) */}
-            <Tooltip title={tooltipTitle} arrow placement="top">
-                <Typography
-                    variant="caption"
-                    sx={{
-                        fontSize: subFontSize,
-                        color: color !== 'text.primary' ? color : 'text.secondary',
-                        fontWeight: 500,
-                        cursor: 'pointer',
-                        width: 'fit-content',
-                        mt: 0.1
-                    }}
-                >
-                    <bdi>{formatCurrency(origVal)}</bdi> ({origSymbol})
-                </Typography>
-            </Tooltip>
-        </Box>
-    );
 };
 
 const InvoicesPage = () => {
@@ -183,10 +80,12 @@ const InvoicesPage = () => {
 
     const [loading, setLoading] = useState(true);
     const [invoices, setInvoices] = useState([]);
-    const [totalRows, setTotalRows] = useState(0);
-    const [activeTargetCurrency, setActiveTargetCurrency] = useState('DEFAULT');
-
-    const totalPages = Math.ceil(totalRows / rowsPerPage);
+    
+    // 🎯 حالات الفلترة والسيرش المحلية
+    const [searchTerm, setSearchTerm] = useState('');
+    const [paymentStatusFilter, setPaymentStatusFilter] = useState('ALL');
+    const [deliveryStatusFilter, setDeliveryStatusFilter] = useState('ALL');
+    const [accountOrBranchFilter, setAccountOrBranchFilter] = useState('ALL');
 
     const fetchCurrencySettings = useCallback(async () => {
         try {
@@ -195,11 +94,8 @@ const InvoicesPage = () => {
             const savedLocalCurr = localStorage.getItem('hub_active_currency');
 
             if (is_unified_enabled) {
-                const currentActive = savedLocalCurr || active_currency || 'DEFAULT';
-                setActiveTargetCurrency(currentActive);
-                return currentActive;
+                return savedLocalCurr || active_currency || 'DEFAULT';
             } else {
-                setActiveTargetCurrency('DEFAULT');
                 return 'DEFAULT';
             }
         } catch (err) {
@@ -208,20 +104,18 @@ const InvoicesPage = () => {
         }
     }, [userId]);
 
-    const fetchPaginatedInvoices = useCallback(async () => {
+    const fetchInvoices = useCallback(async () => {
         setLoading(true);
         try {
             const currentTargetCurr = await fetchCurrencySettings();
 
             const params = {
-                page: page, 
-                limit: rowsPerPage,
                 userId: accountId ? undefined : userId,
                 accountId: accountId || undefined,
                 targetCurrency: currentTargetCurr !== 'DEFAULT' ? currentTargetCurr : undefined
             };
 
-            const response = await API.get('/financial/ledgers/paginated', { params });
+            const response = await API.get('/financial/ledgers/paginated', { params: { ...params, limit: 1000 } });
             if (response.data) {
                 const invoiceData = response.data.data || [];
                 
@@ -235,27 +129,97 @@ const InvoicesPage = () => {
                 });
 
                 setInvoices(sortedInvoices);
-                setTotalRows(response.data.pagination?.totalRows || 0);
             }
         } catch (err) {
-            console.error('Failed compiling paginated core invoice node ledger:', err);
+            console.error('Failed compiling core invoice node ledger:', err);
         } finally {
             setLoading(false);
         }
-    }, [accountId, userId, page, rowsPerPage, fetchCurrencySettings]);
+    }, [accountId, userId, fetchCurrencySettings]);
 
+    // 🎯 جلب البيانات من السيرفر مرة واحدة عند تغيير المعلمات الأساسية
     useEffect(() => {
         if (userId) {
-            if (!searchParams.get('page') || !searchParams.get('limit')) {
-                setSearchParams({
-                    accountId: accountId || '',
-                    page: String(page),
-                    limit: String(rowsPerPage)
-                }, { replace: true });
-            }
-            fetchPaginatedInvoices();
+            fetchInvoices();
         }
-    }, [searchParams, userId, page, rowsPerPage, fetchPaginatedInvoices, setSearchParams, accountId]);
+    }, [userId, accountId, fetchInvoices]);
+
+    // 🎯 تهيئة الـ URL بدون التسبب في إعادة طلب API مع كل صفحة
+    useEffect(() => {
+        if (!searchParams.get('page') || !searchParams.get('limit')) {
+            setSearchParams({
+                accountId: accountId || '',
+                page: String(page),
+                limit: String(rowsPerPage)
+            }, { replace: true });
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // 🎯 استخراج الحسابات / الفروع المتاحة ديناميكياً من الداتا
+    const availableAccountsOrBranches = useMemo(() => {
+        const map = new Map();
+        invoices.forEach(inv => {
+            if (accountId) {
+                const branchKey = inv.branch_name || inv.branch_id || 'Main Branch';
+                if (!map.has(branchKey)) {
+                    map.set(branchKey, inv.branch_name || (lang === 'ar' ? 'الفرع الرئيسي' : 'Main Branch'));
+                }
+            } else {
+                if (inv.account_id && !map.has(String(inv.account_id))) {
+                    map.set(String(inv.account_id), inv.account_name || `Account #${inv.account_id}`);
+                }
+            }
+        });
+        return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    }, [invoices, accountId, lang]);
+
+    // 🎯 تصفية الفواتير بناءً على الفلاتر والسيرش
+    const filteredInvoices = useMemo(() => {
+        let result = [...invoices];
+
+        if (paymentStatusFilter !== 'ALL') {
+            result = result.filter(inv => String(inv.payment_status) === String(paymentStatusFilter));
+        }
+
+        if (deliveryStatusFilter !== 'ALL') {
+            result = result.filter(inv => {
+                const delStatus = inv.requisition_delivery_status ?? 0;
+                return String(delStatus) === String(deliveryStatusFilter);
+            });
+        }
+
+        if (accountOrBranchFilter !== 'ALL') {
+            if (accountId) {
+                result = result.filter(inv => (inv.branch_name || 'Main Branch') === accountOrBranchFilter);
+            } else {
+                result = result.filter(inv => String(inv.account_id) === String(accountOrBranchFilter));
+            }
+        }
+
+        if (searchTerm.trim() !== '') {
+            const term = searchTerm.toLowerCase();
+            result = result.filter(inv =>
+                (inv.invoice_no && inv.invoice_no.toString().toLowerCase().includes(term)) ||
+                (inv.account_name && inv.account_name.toLowerCase().includes(term)) ||
+                (inv.branch_name && inv.branch_name.toLowerCase().includes(term))
+            );
+        }
+
+        return result;
+    }, [invoices, paymentStatusFilter, deliveryStatusFilter, accountOrBranchFilter, searchTerm, accountId]);
+
+    const totalRows = filteredInvoices.length;
+    const totalPages = Math.ceil(totalRows / rowsPerPage) || 1;
+    const paginatedInvoices = filteredInvoices.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+
+    const updateParamsOnFilter = () => {
+        setSearchParams({
+            accountId: accountId || '',
+            page: '1',
+            limit: String(rowsPerPage)
+        });
+    };
 
     const handlePageNumberChange = (event, newPage) => {
         setSearchParams({
@@ -295,17 +259,110 @@ const InvoicesPage = () => {
     });
 
     return (
-        <Layout title={t.allInvoicesTitle || 'Master Invoices Ledger'}>
-            <Box sx={{ mb: 3 }}>
+        <Layout title={t.allInvoicesTitle || (lang === 'ar' ? 'سجل الفواتير الشامل' : 'Master Invoices Ledger')}>
+            <Box sx={{ mb: 2 }}>
                 <Button 
                     size="small" 
                     startIcon={!isRtl ? backArrow : undefined}
                     endIcon={isRtl ? backArrow : undefined}
                     onClick={handleBackNavigation}
+                    sx={{ textTransform: 'none', fontWeight: 600 }}
                 >
-                    {accountId ? t.backToBranch : t.backToGlobalWorkspace}
+                    {accountId ? (t.backToBranch || (lang === 'ar' ? 'العودة للفرع' : 'Back to Branch')) : (t.backToGlobalWorkspace || (lang === 'ar' ? 'العودة للوحة الرئيسية' : 'Back to Dashboard'))}
                 </Button>
             </Box>
+
+            {/* 🎯 شريط السيرش والفلترة */}
+            <Card sx={{ mb: 2.5, boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderRadius: 2 }}>
+                <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                    <Grid container spacing={1.5} alignItems="center">
+                        <Grid item xs={12} md={3.5}>
+                            <TextField
+                                fullWidth
+                                placeholder={lang === 'ar' ? 'البحث برقم الفاتورة، الحساب أو الفرع...' : 'Search by Invoice #, Account, Branch...'}
+                                value={searchTerm}
+                                onChange={(e) => { 
+                                    setSearchTerm(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                                        </InputAdornment>
+                                    ),
+                                    sx: { height: 36, fontSize: '13px' }
+                                }}
+                            />
+                        </Grid>
+
+                        {/* 🎯 فلتر حالة الدفع */}
+                        <Grid item xs={6} sm={4} md={2.5}>
+                            <Select
+                                fullWidth
+                                value={paymentStatusFilter}
+                                onChange={(e) => { 
+                                    setPaymentStatusFilter(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                sx={{ height: 36, fontSize: '13px' }}
+                            >
+                                <MenuItem value="ALL">{lang === 'ar' ? 'جميع حالات التحصيل' : 'All Payment Statuses'}</MenuItem>
+                                <MenuItem value="2">{t.statusPaid || (lang === 'ar' ? 'مدفوع' : 'Paid')}</MenuItem>
+                                <MenuItem value="1">{t.statusPartial || (lang === 'ar' ? 'مدفوع جزئياً' : 'Partially Paid')}</MenuItem>
+                                <MenuItem value="0">{t.statusUnpaid || (lang === 'ar' ? 'غير مدفوع' : 'Unpaid')}</MenuItem>
+                                <MenuItem value="3">{t.statusReturned || (lang === 'ar' ? 'مرتجع' : 'Returned')}</MenuItem>
+                            </Select>
+                        </Grid>
+
+                        {/* 🎯 فلتر حالة التسليم */}
+                        <Grid item xs={6} sm={4} md={2.5}>
+                            <Select
+                                fullWidth
+                                value={deliveryStatusFilter}
+                                onChange={(e) => { 
+                                    setDeliveryStatusFilter(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                sx={{ height: 36, fontSize: '13px' }}
+                            >
+                                <MenuItem value="ALL">{lang === 'ar' ? 'جميع حالات التسليم' : 'All Delivery Statuses'}</MenuItem>
+                                <MenuItem value="0">{t.deliveryDirect || (lang === 'ar' ? 'تسليم مباشر' : 'Immediate')}</MenuItem>
+                                <MenuItem value="3">{t.deliveryPending || (lang === 'ar' ? 'تحت التسليم' : 'Pending')}</MenuItem>
+                                <MenuItem value="1">{t.deliveryReceived || (lang === 'ar' ? 'مُسلَّم' : 'Received')}</MenuItem>
+                                <MenuItem value="4">{t.deliveryPartialReceived || (lang === 'ar' ? 'مُسلَّم جزئياً' : 'Partially Received')}</MenuItem>
+                                <MenuItem value="2">{t.deliveryRejected || (lang === 'ar' ? 'مرفوض' : 'Rejected')}</MenuItem>
+                            </Select>
+                        </Grid>
+
+                        {/* 🎯 فلتر الفروع أو الحسابات */}
+                        <Grid item xs={12} sm={4} md={3.5}>
+                            <Select
+                                fullWidth
+                                value={accountOrBranchFilter}
+                                onChange={(e) => { 
+                                    setAccountOrBranchFilter(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                sx={{ height: 36, fontSize: '13px' }}
+                            >
+                                <MenuItem value="ALL">
+                                    {accountId 
+                                        ? (lang === 'ar' ? 'جميع الفروع' : 'All Branches')
+                                        : (lang === 'ar' ? 'جميع الحسابات' : 'All Accounts')}
+                                </MenuItem>
+                                {availableAccountsOrBranches.map(item => (
+                                    <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>
+                                ))}
+                            </Select>
+                        </Grid>
+                    </Grid>
+                </CardContent>
+            </Card>
 
             <Card sx={{ boxShadow: '0 4px 16px rgba(0,0,0,0.04)', borderRadius: 2 }}>
                 <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
@@ -350,21 +407,21 @@ const InvoicesPage = () => {
                                             <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 140 }}>{t.netRevenueLabel || 'Net Revenue'}</TableCell>
                                             <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 120 }}>{t.taxLabel || 'Tax'}</TableCell>
                                             <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 170 }}>{t.totalLabel || 'Gross Total'}</TableCell>
-                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 140 }}>{t.totalFleetCogs || 'COGS Cost'}</TableCell>
+                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 140 }}>{t.cogsCostLabel || 'COGS Cost'}</TableCell>
                                             <TableCell sx={{ fontWeight: 700, py: 2, minWidth: 130 }} align="center">{t.paymentStatusLabel || 'Payment'}</TableCell>
                                             <TableCell sx={{ fontWeight: 700, py: 2, minWidth: 140 }} align="center">{t.deliveryStatusLabel || 'Delivery'}</TableCell>
                                             <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, px: 2, minWidth: 130 }}>{t.createdAt}</TableCell>
                                         </TableRow>
                                     </TableHead>
                                     <TableBody>
-                                        {invoices.length === 0 ? (
+                                        {paginatedInvoices.length === 0 ? (
                                             <TableRow>
                                                 <TableCell colSpan={10} align="center" sx={{ py: 6, color: 'text.secondary' }}>
-                                                    {t.noTransactions}
+                                                    {t.noTransactions || (lang === 'ar' ? 'لا توجد فواتير مطابقة للبحث.' : 'No matching invoices found.')}
                                                 </TableCell>
                                             </TableRow>
                                         ) : (
-                                            invoices.map((inv) => {
+                                            paginatedInvoices.map((inv) => {
                                                 const returnedAmount = parseFloat(inv.total_returned || 0);
 
                                                 return (
@@ -430,7 +487,6 @@ const InvoicesPage = () => {
                                                             )}
                                                         </TableCell>
 
-                                                        {/* Gross Subtotal */}
                                                         <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
                                                             <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                                                                 <CurrencyDisplay
@@ -451,7 +507,6 @@ const InvoicesPage = () => {
                                                             </Box>
                                                         </TableCell>
 
-                                                        {/* Net Revenue */}
                                                         <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
                                                             <CurrencyDisplay
                                                                 amount={inv.net_revenue}
@@ -466,7 +521,6 @@ const InvoicesPage = () => {
                                                             />
                                                         </TableCell>
 
-                                                        {/* Tax */}
                                                         <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
                                                             <CurrencyDisplay
                                                                 amount={inv.tax_amount}
@@ -481,7 +535,6 @@ const InvoicesPage = () => {
                                                             />
                                                         </TableCell>
 
-                                                        {/* Gross Total */}
                                                         <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
                                                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.3 }}>
                                                                 <CurrencyDisplay
@@ -533,7 +586,6 @@ const InvoicesPage = () => {
                                                             </Box>
                                                         </TableCell>
 
-                                                        {/* COGS */}
                                                         <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
                                                             <CurrencyDisplay
                                                                 amount={inv.total_cogs}
@@ -560,12 +612,12 @@ const InvoicesPage = () => {
                                 </Table>
                             </TableContainer>
 
-                            {/* FOOTER PAGINATION */}
+                            {/* 🎯 FOOTER PAGINATION */}
                             <Box 
                                 sx={{ 
                                     display: 'flex', 
                                     alignItems: 'center', 
-                                    justify: 'space-between', 
+                                    justifyContent: 'space-between', 
                                     p: 2, 
                                     flexWrap: 'wrap',
                                     gap: 2,
@@ -574,7 +626,7 @@ const InvoicesPage = () => {
                             >
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-                                        {t.rowsPerPage || 'Rows per page:'}
+                                        {t.rowsPerPage || (lang === 'ar' ? 'عدد الصفوف لكل صفحة:' : 'Rows per page:')}
                                     </Typography>
                                     <Select
                                         value={rowsPerPage}
@@ -593,7 +645,7 @@ const InvoicesPage = () => {
 
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-                                        <bdi>{`${((page - 1) * rowsPerPage) + 1}-${Math.min(page * rowsPerPage, totalRows)} ${t.of || 'of'} ${totalRows}`}</bdi>
+                                        <bdi>{totalRows > 0 ? `${((page - 1) * rowsPerPage) + 1}-${Math.min(page * rowsPerPage, totalRows)} ${t.of || (lang === 'ar' ? 'من' : 'of')} ${totalRows}` : '0-0 of 0'}</bdi>
                                     </Typography>
 
                                     <Pagination
@@ -605,6 +657,7 @@ const InvoicesPage = () => {
                                         shape="rounded"
                                         showFirstButton
                                         showLastButton
+                                        dir={isRtl ? 'rtl' : 'ltr'}
                                     />
                                 </Box>
                             </Box>

@@ -3,57 +3,13 @@ import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import {
     Box, Card, CardContent, Table, TableHead, TableBody,
     TableRow, TableCell, TableContainer, Paper, Button,
-    CircularProgress, Pagination, Select, MenuItem, Typography, Chip, Tooltip,
+    CircularProgress, Pagination, Select, MenuItem, Typography, Chip
 } from '@mui/material';
 import { ArrowBackRounded as ArrowBackIcon } from '@mui/icons-material';
 import API from '../services/api';
 import Layout from '../components/Layout';
+import CurrencyDisplay from '../components/CurrencyDisplay';
 import { useLanguage } from '../LanguageContext';
-import { getCurrencySymbol, getCurrencyFullName } from '../i18n/currencies';
-import { formatCurrency } from '../utils/formatters';
-
-const CurrencyDisplay = ({
-    amount,
-    currencyCode,
-    baseCurrencyCode,
-    isUnified = false,
-    displayCurrency,
-    lang,
-    isBold = false,
-    color = 'text.primary',
-    size = 'body2'
-}) => {
-    const activeCurr = (isUnified ? displayCurrency : (baseCurrencyCode || currencyCode || 'EGP')).toUpperCase();
-    const origVal = parseFloat(amount || 0);
-
-    const activeFullName = getCurrencyFullName(activeCurr, lang);
-    const activeSymbol = getCurrencySymbol(activeCurr, lang);
-
-    const fontSize = size === 'caption' ? '11px' : '13px';
-
-    return (
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-            <Typography variant={size} sx={{ fontSize, fontWeight: isBold ? 700 : 500, color }}>
-                <bdi>{formatCurrency(origVal)}</bdi>
-            </Typography>
-            <Tooltip title={activeFullName} arrow placement="top">
-                <Typography
-                    component="span"
-                    variant={size}
-                    sx={{
-                        fontSize,
-                        fontWeight: isBold ? 700 : 600,
-                        color: color !== 'text.primary' ? color : 'text.secondary',
-                        cursor: 'pointer',
-                        textDecoration: 'underline dotted'
-                    }}
-                >
-                    ({activeSymbol})
-                </Typography>
-            </Tooltip>
-        </Box>
-    );
-};
 
 const ProductsPage = () => {
     const navigate = useNavigate();
@@ -70,7 +26,6 @@ const ProductsPage = () => {
     const [loading,   setLoading]   = useState(true);
     const [products,  setProducts]  = useState([]);
     const [totalRows, setTotalRows] = useState(0);
-    const [activeTargetCurrency, setActiveTargetCurrency] = useState('DEFAULT');
 
     const totalPages = Math.ceil(totalRows / rowsPerPage) || 1;
     const defaultsInitialised = useRef(false);
@@ -83,11 +38,8 @@ const ProductsPage = () => {
             const savedLocalCurr = localStorage.getItem('hub_active_currency');
 
             if (is_unified_enabled) {
-                const currentActive = savedLocalCurr || active_currency || 'DEFAULT';
-                setActiveTargetCurrency(currentActive);
-                return currentActive;
+                return savedLocalCurr || active_currency || 'DEFAULT';
             } else {
-                setActiveTargetCurrency('DEFAULT');
                 return 'DEFAULT';
             }
         } catch (err) {
@@ -130,6 +82,7 @@ const ProductsPage = () => {
 
         if (!accountId) return;
         fetchPaginatedProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [accountId, page, rowsPerPage, fetchPaginatedProducts]);
 
     const handlePageNumberChange = (event, newPage) => {
@@ -167,14 +120,14 @@ const ProductsPage = () => {
                                 <Table size="small" sx={{ minWidth: 1000 }}>
                                     <TableHead sx={{ bgcolor: 'rgba(0, 0, 0, 0.02)' }}>
                                         <TableRow>
-                                            <TableCell sx={{ fontWeight: 700, py: 2, px: 2 }}>{t.productCode      || 'Code / ID'}</TableCell>
-                                            <TableCell sx={{ fontWeight: 700, py: 2 }}>        {t.productName      || 'Product Name'}</TableCell>
-                                            <TableCell sx={{ fontWeight: 700, py: 2 }}>        {t.branchLabel      || 'Branch'}</TableCell>
-                                            <TableCell sx={{ fontWeight: 700, py: 2 }} align="center">{t.soldQty   || 'Net Sold Qty'}</TableCell>
-                                            <TableCell sx={{ fontWeight: 700, py: 2 }}>        {t.totalSalesValue  || 'Total Sales Value'}</TableCell>
-                                            <TableCell sx={{ fontWeight: 700, py: 2 }} align="center">{t.pendingStock || 'Pending Stock'}</TableCell>
-                                            <TableCell sx={{ fontWeight: 700, py: 2 }} align="center">{t.availableStock || 'Available Stock'}</TableCell>
-                                            <TableCell sx={{ fontWeight: 700, py: 2, px: 2 }} align="center">{t.totalStock || 'Total Stock'}</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, py: 2, px: 2 }}>{t.productCode}</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, py: 2 }}>{t.productName}</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, py: 2 }}>{t.branchLabel}</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, py: 2 }} align="center">{t.soldQty}</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, py: 2 }}>{t.totalSalesValue}</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, py: 2 }} align="center">{t.pendingStock}</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, py: 2 }} align="center">{t.availableStock}</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, py: 2, px: 2 }} align="center">{t.totalStock}</TableCell>
                                         </TableRow>
                                     </TableHead>
                                     <TableBody>
@@ -209,7 +162,7 @@ const ProductsPage = () => {
                                                             />
                                                         </TableCell>
                                                         
-                                                        {/* 🎯 إجمالي المبيعات بالعملة الموحدة */}
+                                                        {/* 🎯 إجمالي المبيعات باستخدام CurrencyDisplay الموحد */}
                                                         <TableCell sx={{ py: 1.8, fontWeight: 700, color: 'success.main' }}>
                                                             <CurrencyDisplay
                                                                 amount={p.total_revenue}
@@ -288,7 +241,7 @@ const ProductsPage = () => {
                                         onChange={handlePageNumberChange}
                                         color="primary" size="small" shape="rounded"
                                         showFirstButton showLastButton
-                                        sx={{ '& .MuiPagination-ul': { flexDirection: isRtl ? 'scaleX(-1)' : 'row' } }}
+                                        sx={{ '& .MuiPagination-ul': { flexDirection: isRtl ? 'row-reverse' : 'row' } }}
                                     />
                                 </Box>
                             </Box>

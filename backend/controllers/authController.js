@@ -67,7 +67,8 @@ const loginUser = async (req, res) => {
 // 🤝 3. Daftra Multi-Account Connection & Handshake
 // ─────────────────────────────────────────────
 const daftraLoginHandshake = async (req, res) => {
-    const { subdomain, email, password, userId } = req.body;
+    const { subdomain, email, password } = req.body;
+    const userId = req.user.userId; // 🎯 أمان: استخراج من التوكن
 
     if (!subdomain || !email || !password || !userId) {
         return res.status(400).json({ error: 'All credentials and user context are required' });
@@ -171,9 +172,10 @@ const daftraLoginHandshake = async (req, res) => {
 const getSyncJobStatus = async (req, res) => {
     try {
         const { jobId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان: استخراج من التوكن
         const result = await pool.query(
-            'SELECT id, status, current_step, total_records, processed_records, progress_percentage, error_message FROM sync_jobs WHERE id = $1;',
-            [jobId]
+            'SELECT id, status, current_step, total_records, processed_records, progress_percentage, error_message FROM sync_jobs WHERE id = $1 AND user_id = $2;',
+            [jobId, userId]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Sync job not found.' });
@@ -188,7 +190,7 @@ const getSyncJobStatus = async (req, res) => {
 // 🏢 5. Fetch Linked Accounts for a User
 // ─────────────────────────────────────────────
 const getLinkedAccounts = async (req, res) => {
-    const { userId } = req.params;
+    const userId = req.user.userId; // 🎯 أمان: استخراج من التوكن
     try {
         const result = await pool.query(
             'SELECT id, daftra_subdomain, daftra_site_id, account_name, currency_code, sync_status, created_at FROM linked_accounts WHERE user_id = $1;',
@@ -206,20 +208,21 @@ const getLinkedAccounts = async (req, res) => {
 // ─────────────────────────────────────────────
 const deleteLinkedAccount = async (req, res) => {
     const { accountId } = req.params;
+    const userId = req.user.userId; // 🎯 أمان: استخراج من التوكن
     const client = await pool.connect();
 
     try {
         await client.query('BEGIN');
 
+        // 🎯 أمان: التأكد من الملكية
         const accountResult = await client.query(
-            'SELECT user_id FROM linked_accounts WHERE id = $1;',
-            [accountId]
+            'SELECT user_id FROM linked_accounts WHERE id = $1 AND user_id = $2;',
+            [accountId, userId]
         );
         if (accountResult.rows.length === 0) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: 'Account not found' });
+            return res.status(404).json({ error: 'Account not found or unauthorized' });
         }
-        const userId = accountResult.rows[0].user_id;
 
         await client.query('DELETE FROM daily_product_sales_cache  WHERE account_id = $1;', [accountId]);
         await client.query('DELETE FROM products_cache             WHERE account_id = $1;', [accountId]);

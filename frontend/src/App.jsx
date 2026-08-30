@@ -9,7 +9,7 @@ import Login                  from './pages/Login';
 import GlobalDashboard        from './pages/GlobalDashboard';
 import BranchDashboard        from './pages/BranchDashboard';
 import InvoicesPage           from './pages/InvoicesPage';
-import PaymentsPage           from './pages/PaymentsPage'; // 👈 إضافة صفحة المدفوعات والمقبوضات
+import PaymentsPage           from './pages/PaymentsPage';
 import ClientsPage            from './pages/ClientsPage';
 import ConnectedAccountsPage  from './pages/ConnectedAccountsPage';
 import FinancialReportPage    from './pages/FinancialReportPage';
@@ -18,19 +18,19 @@ import TreasuriesPage         from './pages/TreasuriesPage';
 import TreasuryDetailsPage    from './pages/TreasuryDetailsPage';
 import SettingsPage           from './pages/SettingsPage';
 
-function App() {
-    // 🔍 فحص وجود التوكين للتوجيه المباشر في الصفحة الرئيسية "/"
+// 🎯 مكوّن توجيه ديناميكي يتحقق من التوكن في كل مرة يتم فيها الوصول للمسار الجذري (Root)
+const RootRedirect = () => {
     const token = localStorage.getItem('token');
+    return <Navigate to={token ? "/dashboard" : "/login"} replace />;
+};
 
+function App() {
     return (
         <Router>
             <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
                 <Routes>
-                    {/* 🌐 Redirect Root Path depending on Session */}
-                    <Route 
-                        path="/" 
-                        element={<Navigate to={token ? "/dashboard" : "/login"} replace />} 
-                    />
+                    {/* 🌐 Redirect Root Path depending on Session dynamically */}
+                    <Route path="/" element={<RootRedirect />} />
 
                     {/* 🌐 Public routes — protected from logged-in users */}
                     <Route path="/login" element={
@@ -80,7 +80,7 @@ function App() {
                     } />
 
                     {/* 🔄 Fallback route for unknown URLs */}
-                    <Route path="*" element={<Navigate to={token ? "/dashboard" : "/login"} replace />} />
+                    <Route path="*" element={<RootRedirect />} />
                 </Routes>
             </Box>
         </Router>

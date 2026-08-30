@@ -28,6 +28,25 @@ const buildBulkInQuery = (paramName, idsArray) => {
 };
 
 /**
+ * 🏢 Helper to resolve branch IDs safely (ضمان شمول جميع الفروع دائماً)
+ */
+const resolveBranchFilter = async (cleanSubdomain, config, branchIds = []) => {
+    let finalBranchIds = Array.isArray(branchIds) ? branchIds.filter(Boolean) : [];
+    
+    // لو لم يتم إرسال فروع، نسحب كافة فروع الحساب من دفترة تلقائياً لتجنب سقوط البيانات
+    if (finalBranchIds.length === 0) {
+        try {
+            const allBranches = await fetchBranchesFromDaftra(cleanSubdomain, config);
+            finalBranchIds = allBranches.map(b => b.id || b.branch_id).filter(Boolean);
+        } catch (err) {
+            console.error(`⚠️ Failed auto-resolving all branches for ${cleanSubdomain}:`, err.message);
+        }
+    }
+    
+    return buildBulkInQuery('branch_id', finalBranchIds);
+};
+
+/**
  * 📅 Dynamic Date Filter Helper (30-day window or Single Day)
  */
 const getDateRangeFilter = (isSingleDay = false, paramType = 'date') => {
@@ -102,26 +121,14 @@ const fetchAllPagesV2 = async (baseUrl, config, onPageFetched = null) => {
  */
 const checkDaftraAppActive = async (cleanSubdomain, config) => {
     return true;
-    // try {
-    //     const url = `https://${cleanSubdomain}.daftra.com/v2/api/app-manager/is_active/${DAFTRA_APP_ID}`;
-    //     const response = await axios.get(url, config);
-        
-    //     if (response.data && response.data.status === true) {
-    //         return true;
-    //     }
-    //     return false;
-    // } catch (err) {
-    //     console.error(`⚠️ App activation check failed for ${cleanSubdomain}:`, err.message);
-    //     return false;
-    // }
 };
 
 /**
- * 📊 1. PRELIMINARY ACCURATE COUNT FUNCTION (محدثة بحساب أعداد المدفوعات)
+ * 📊 1. PRELIMINARY ACCURATE COUNT FUNCTION
  */
 const fetchExactEntityTotals = async (cleanSubdomain, config, branchIds = [], treasuryAccountIds = []) => {
     let exactTotal = 0;
-    const branchFilter = buildBulkInQuery('branch_id', branchIds);
+    const branchFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
     const treasuryFilter = buildBulkInQuery('journal_account_id', treasuryAccountIds);
     const dateFilter = getDateRangeFilter(false, 'date');
     const createdFilter = getDateRangeFilter(false, 'created');
@@ -150,7 +157,7 @@ const fetchExactEntityTotals = async (cleanSubdomain, config, branchIds = [], tr
         console.error("⚠️ Preliminary refund receipts count failed:", e.message);
     }
 
-    // 3. Invoice Payments (🎯 جديد: حساب أعداد المدفوعات ليكون الإجمالي مضبوط 100%)
+    // 3. Invoice Payments
     try {
         const payUrl = `https://${cleanSubdomain}.daftra.com/v2/api/entity/invoice_payment/list/-1?${branchFilter}&${dateFilter}&page=1`;
         const res = await axios.get(payUrl, axiosOptions);
@@ -254,7 +261,7 @@ const fetchTreasuryTransactionsFromDaftra = async (cleanSubdomain, config, journ
  * 📄 5. Fetch Invoices
  */
 const fetchInvoicesV2FromDaftra = async (cleanSubdomain, config, branchIds = [], extraFilter = '', onProgress = null) => {
-    const branchFilter = buildBulkInQuery('branch_id', branchIds);
+    const branchFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
     const queryParts = [branchFilter, 'filter[type]=0', 'filter[deleted_at][is_null]', extraFilter].filter(Boolean).join('&');
     const url = `https://${cleanSubdomain}.daftra.com/v2/api/entity/invoice/list/-1?${queryParts}`;
     return await fetchAllPagesV2(url, config, onProgress);
@@ -264,24 +271,24 @@ const fetchInvoicesV2FromDaftra = async (cleanSubdomain, config, branchIds = [],
  * 🔄 5.1 Fetch Refund Receipts
  */
 const fetchRefundReceiptsV2FromDaftra = async (cleanSubdomain, config, branchIds = [], extraFilter = '', onProgress = null) => {
-    const branchFilter = buildBulkInQuery('branch_id', branchIds);
+    const branchFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
     const queryParts = [branchFilter, 'filter[deleted_at][is_null]', extraFilter].filter(Boolean).join('&');
     const url = `https://${cleanSubdomain}.daftra.com/v2/api/entity/refund_receipt/list/-1?${queryParts}`;
     return await fetchAllPagesV2(url, config, onProgress);
 };
 
 /**
- * 💳 5.2 Fetch Invoice Payments (🎯 سحب مدفوعات الفواتير والعملاء)
+ * 💳 5.2 Fetch Invoice Payments
  */
 const fetchInvoicePaymentsFromDaftra = async (cleanSubdomain, config, branchIds = [], extraFilter = '', onProgress = null) => {
-    const branchFilter = buildBulkInQuery('branch_id', branchIds);
+    const branchFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
     const queryParts = [branchFilter, extraFilter].filter(Boolean).join('&');
     const url = `https://${cleanSubdomain}.daftra.com/v2/api/entity/invoice_payment/list/-1?${queryParts}`;
     return await fetchAllPagesV2(url, config, onProgress);
 };
 
 /**
- * 📄 5.3 Fetch Single Invoice Number Directly (🎯 جلب رقم الفاتورة عند الحاجة)
+ * 📄 5.3 Fetch Single Invoice Number Directly
  */
 const fetchSingleInvoiceNoFromDaftra = async (cleanSubdomain, config, invoiceId) => {
     try {
@@ -299,7 +306,7 @@ const fetchSingleInvoiceNoFromDaftra = async (cleanSubdomain, config, invoiceId)
 };
 
 /**
- * 🔱 5.4 Fetch Payment Exchange Rate from Journal (🎯 جلب سعر الصرف للمدفوعة)
+ * 🔱 5.4 Fetch Payment Exchange Rate from Journal
  */
 const fetchPaymentExchangeRateFromDaftra = async (cleanSubdomain, config, paymentId) => {
     try {
@@ -329,25 +336,26 @@ const fetchPaymentExchangeRateFromDaftra = async (cleanSubdomain, config, paymen
  * 👥 6. Fetch Clients Directory
  */
 const fetchClientsFromDaftra = async (cleanSubdomain, config, branchIds = [], onProgress = null) => {
-    const branchFilter = buildBulkInQuery('branch_id', branchIds);
+    const branchFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
     const url = `https://${cleanSubdomain}.daftra.com/v2/api/entity/client/list/-1?${branchFilter}`;
-    return await fetchAllPagesV2(url, config);
+    return await fetchAllPagesV2(url, config, onProgress);
 };
 
 /**
  * 📦 7. Fetch Products Directory
  */
 const fetchProductsFromDaftra = async (cleanSubdomain, config, branchIds = [], onProgress = null) => {
-    const branchFilter = buildBulkInQuery('branch_id', branchIds);
+    const branchFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
     const url = `https://${cleanSubdomain}.daftra.com/v2/api/entity/product/list/1?${branchFilter}`;
-    return await fetchAllPagesV2(url, config);
+    return await fetchAllPagesV2(url, config, onProgress);
 };
 
 /**
- * 🧾 8. Fetch Invoice Items
+ * 🧾 8. Fetch Invoice Items (🎯 تم إضافة فلتر الفروع هنا لمنع سقوط الداتا)
  */
-const fetchInvoiceItemsFromDaftra = async (cleanSubdomain, config, specificDate = null, onProgress = null) => {
-    let url = `https://${cleanSubdomain}.daftra.com/v2/api/entity/invoice_item/list/1?filter[invoice.deleted_at][is_null]&filter[invoice.type]=0`;
+const fetchInvoiceItemsFromDaftra = async (cleanSubdomain, config, specificDate = null, branchIds = [], onProgress = null) => {
+    const branchFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
+    let url = `https://${cleanSubdomain}.daftra.com/v2/api/entity/invoice_item/list/1?filter[invoice.deleted_at][is_null]&filter[invoice.type]=0&${branchFilter}`;
     if (specificDate) {
         url += `&filter[invoice.date][equal]=${specificDate}`;
     }
@@ -360,7 +368,7 @@ const fetchInvoiceItemsFromDaftra = async (cleanSubdomain, config, specificDate 
 const fetchRequisitionsFromDaftra = async (cleanSubdomain, config, branchIds = [], orderIds = []) => {
     if (!orderIds || orderIds.length === 0) return [];
 
-    const branchFilter = buildBulkInQuery('branch_id', branchIds);
+    const branchFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
     const chunks = chunkArray(orderIds, 10);
     let aggregatedResults = [];
 
@@ -459,7 +467,7 @@ const fetchInvoiceCOGSDirectly = async (cleanSubdomain, config, daftraInvoiceId)
  */
 const fetchJournalCategoriesFromDaftra = async (cleanSubdomain, config, targetParentCatIds = [27, 43], branchIds = []) => {
     const bulkCatFilter = buildBulkInQuery('journal_cat_id', targetParentCatIds);
-    const bulkBranchFilter = buildBulkInQuery('branch_id', branchIds);
+    const bulkBranchFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
 
     const queryParts = [bulkCatFilter, bulkBranchFilter].filter(Boolean).join('&');
     const url = `https://${cleanSubdomain}.daftra.com/v2/api/entity/journal_cat/list/-1?${queryParts}`;
@@ -473,7 +481,7 @@ const fetchJournalCategoriesFromDaftra = async (cleanSubdomain, config, targetPa
 const fetchJournalAccountsFromDaftra = async (cleanSubdomain, config, categoryIds = [], branchIds = []) => {
     if (!categoryIds || categoryIds.length === 0) return [];
 
-    const extraFilter = (branchIds && branchIds.length > 0) ? buildBulkInQuery('branch_id', branchIds) : '';
+    const extraFilter = await resolveBranchFilter(cleanSubdomain, config, branchIds);
     const chunks = chunkArray(categoryIds, 10);
     let aggregatedResults = [];
 

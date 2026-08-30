@@ -28,6 +28,14 @@ API.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response?.status === 401) {
+            // 🎯 تنبيه المستخدم بلغة الواجهة قبل الخروج
+            const lang = localStorage.getItem('lang') || 'ar';
+            alert(
+                lang === 'ar' 
+                    ? 'انتهت الجلسة لأسباب أمنية، يرجى تسجيل الدخول مجدداً.' 
+                    : 'Session expired for security reasons. Please log in again.'
+            );
+
             localStorage.clear();
             window.location.href = '/login';
         }

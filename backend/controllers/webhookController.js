@@ -2,8 +2,8 @@ const pool = require('../config/db');
 const { parseDaftraDueDate } = require('../utils/helpers');
 const { 
     syncDailyTreasuryTotals, 
-    recalculateGlobalUserRollup,
-    syncPendingRequisitionsForAccount 
+    recalculateGlobalUserRollup
+    // 🎯 تمت إزالة الاستدعاء هنا للحماية
 } = require('../services/syncService');
 const { fetchInvoiceJournalEntry } = require('../services/daftraService');
 
@@ -252,10 +252,9 @@ const handleDaftraWebhook = async (req, res) => {
                     isReturnFlag,
                 ]);
 
-                // 🎯 تشغيل الفحص الموجه للأذون المعلقة فوراً لهذا الحساب فقط في الخلفية
+                // 🎯 تشغيل حساب المجموعيات فقط لحماية السيرفر من الـ Webhook Storm
                 setImmediate(async () => {
                     try {
-                        await syncPendingRequisitionsForAccount(account.id);
                         await recalculateGlobalUserRollup(account.user_id);
                     } catch (e) {
                         console.error('Webhook background sync error:', e.message);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
     Box,
@@ -18,9 +18,9 @@ import {
     MenuItem,
     Typography,
     Chip,
-    Tooltip,
     TextField,
     InputAdornment,
+    Grid,
     Stack,
     useTheme,
     alpha
@@ -34,111 +34,8 @@ import {
 } from '@mui/icons-material';
 import API from '../services/api';
 import Layout from '../components/Layout';
+import CurrencyDisplay from '../components/CurrencyDisplay';
 import { useLanguage } from '../LanguageContext';
-import { getCurrencySymbol, getCurrencyFullName } from '../i18n/currencies';
-
-const formatCurrency = (val) => {
-    const num = parseFloat(val || 0);
-    return num.toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-};
-
-const CurrencyDisplay = ({
-    amount,
-    baseAmount,
-    currencyCode,
-    baseCurrencyCode,
-    exchangeRate,
-    isUnified = false,
-    displayCurrency,
-    lang,
-    isBold = false,
-    color = 'text.primary',
-    size = 'body2'
-}) => {
-    const rate = parseFloat(exchangeRate || 1);
-    const activeCurr = (isUnified ? displayCurrency : (baseCurrencyCode || 'EGP')).toUpperCase();
-    const invCurr = (currencyCode || 'EGP').toUpperCase();
-
-    const isForeign = !isUnified && (invCurr !== activeCurr && rate !== 1);
-
-    const origVal = parseFloat(amount || 0);
-    const baseVal = baseAmount !== undefined && baseAmount !== null 
-        ? parseFloat(baseAmount || 0) 
-        : origVal * rate;
-
-    const origFullName = getCurrencyFullName(invCurr, lang);
-    const activeFullName = getCurrencyFullName(activeCurr, lang);
-
-    const origSymbol = getCurrencySymbol(invCurr, lang);
-    const activeSymbol = getCurrencySymbol(activeCurr, lang);
-
-    const fontSize = size === 'caption' ? '11px' : '13px';
-    const subFontSize = size === 'caption' ? '9.5px' : '11px';
-
-    if (!isForeign) {
-        return (
-            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant={size} sx={{ fontSize, fontWeight: isBold ? 700 : 500, color }}>
-                    <bdi>{formatCurrency(baseVal)}</bdi>
-                </Typography>
-                <Tooltip title={activeFullName} arrow placement="top">
-                    <Typography
-                        component="span"
-                        variant={size}
-                        sx={{
-                            fontSize,
-                            fontWeight: isBold ? 700 : 600,
-                            color: color !== 'text.primary' ? color : 'text.secondary',
-                            cursor: 'pointer',
-                        }}
-                    >
-                        ({activeSymbol})
-                    </Typography>
-                </Tooltip>
-            </Box>
-        );
-    }
-
-    const tooltipTitle = `1 ${origSymbol} = ${formatCurrency(rate)} ${activeSymbol} (${activeFullName})`;
-
-    return (
-        <Box sx={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1.2 }}>
-            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant={size} sx={{ fontSize, fontWeight: isBold ? 700 : 600, color }}>
-                    <bdi>{formatCurrency(baseVal)}</bdi>
-                </Typography>
-                <Tooltip title={activeFullName} arrow placement="top">
-                    <Typography
-                        component="span"
-                        variant={size}
-                        sx={{ fontSize, fontWeight: 700, color: color !== 'text.primary' ? color : 'text.secondary', cursor: 'pointer' }}
-                    >
-                        ({activeSymbol})
-                    </Typography>
-                </Tooltip>
-            </Box>
-
-            <Tooltip title={tooltipTitle} arrow placement="top">
-                <Typography
-                    variant="caption"
-                    sx={{
-                        fontSize: subFontSize,
-                        color: color !== 'text.primary' ? color : 'text.secondary',
-                        fontWeight: 500,
-                        cursor: 'pointer',
-                        width: 'fit-content',
-                        mt: 0.1
-                    }}
-                >
-                    <bdi>{formatCurrency(origVal)}</bdi> ({origSymbol})
-                </Typography>
-            </Tooltip>
-        </Box>
-    );
-};
 
 const PaymentsPage = () => {
     const navigate = useNavigate();
@@ -148,8 +45,6 @@ const PaymentsPage = () => {
     const isRtl = lang === 'ar' || t.dir === 'rtl';
 
     const userId = localStorage.getItem('userId');
-
-    // 🎯 قراءة accountId من الـ Query Params للتصفية بناءً على الفرع عند التحويل
     const accountId = searchParams.get('accountId');
 
     const page = parseInt(searchParams.get('page') || '1', 10);
@@ -162,6 +57,8 @@ const PaymentsPage = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [paymentTypeFilter, setPaymentTypeFilter] = useState('ALL');
     const [methodFilter, setMethodFilter] = useState('ALL');
+    const [treasuryFilter, setTreasuryFilter] = useState('ALL');
+    const [accountOrBranchFilter, setAccountOrBranchFilter] = useState('ALL');
 
     const fetchCurrencySettings = useCallback(async () => {
         try {
@@ -188,7 +85,6 @@ const PaymentsPage = () => {
                 params.targetCurrency = currentTargetCurr;
             }
             
-            // 🎯 إضافة accountId للبارامترات لو متواجد للفلترة بالفرع
             if (accountId) {
                 params.accountId = accountId;
             }
@@ -199,7 +95,6 @@ const PaymentsPage = () => {
                     p => p.payment_method?.toLowerCase() !== 'starting_balance'
                 );
 
-                // 🎯 تصفية الفرع بداخل الفرونت إند لضمان العرض الدقيق فقط للفرع المحدد
                 if (accountId) {
                     validPayments = validPayments.filter(p => String(p.account_id) === String(accountId));
                 }
@@ -215,14 +110,59 @@ const PaymentsPage = () => {
 
     useEffect(() => {
         if (userId) {
-            if (!searchParams.get('page') || !searchParams.get('limit')) {
-                const newParams = { page: String(page), limit: String(rowsPerPage) };
-                if (accountId) newParams.accountId = accountId;
-                setSearchParams(newParams, { replace: true });
-            }
             fetchPayments();
         }
-    }, [searchParams, userId, accountId, page, rowsPerPage, fetchPayments, setSearchParams]);
+    }, [userId, accountId, fetchPayments]);
+
+    useEffect(() => {
+        if (!searchParams.get('page') || !searchParams.get('limit')) {
+            const newParams = { page: String(page), limit: String(rowsPerPage) };
+            if (accountId) newParams.accountId = accountId;
+            setSearchParams(newParams, { replace: true });
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const availablePaymentTypes = useMemo(() => {
+        const set = new Set();
+        payments.forEach(p => {
+            if (p.payment_type) set.add(p.payment_type);
+        });
+        return Array.from(set);
+    }, [payments]);
+
+    const availableTreasuries = useMemo(() => {
+        const set = new Set();
+        payments.forEach(p => {
+            if (p.treasury_name) set.add(p.treasury_name);
+        });
+        return Array.from(set);
+    }, [payments]);
+
+    const availableMethods = useMemo(() => {
+        const set = new Set();
+        payments.forEach(p => {
+            if (p.payment_method) set.add(p.payment_method.toLowerCase());
+        });
+        return Array.from(set);
+    }, [payments]);
+
+    const availableAccountsOrBranches = useMemo(() => {
+        const map = new Map();
+        payments.forEach(p => {
+            if (accountId) {
+                const branchKey = p.branch_name || p.branch_id || 'Main Branch';
+                if (!map.has(branchKey)) {
+                    map.set(branchKey, p.branch_name || (lang === 'ar' ? 'الفرع الرئيسي' : 'Main Branch'));
+                }
+            } else {
+                if (p.account_id && !map.has(String(p.account_id))) {
+                    map.set(String(p.account_id), p.account_name || `Account #${p.account_id}`);
+                }
+            }
+        });
+        return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    }, [payments, accountId, lang]);
 
     useEffect(() => {
         let result = [...payments];
@@ -233,6 +173,18 @@ const PaymentsPage = () => {
 
         if (methodFilter !== 'ALL') {
             result = result.filter(p => p.payment_method?.toLowerCase() === methodFilter.toLowerCase());
+        }
+
+        if (treasuryFilter !== 'ALL') {
+            result = result.filter(p => p.treasury_name === treasuryFilter);
+        }
+
+        if (accountOrBranchFilter !== 'ALL') {
+            if (accountId) {
+                result = result.filter(p => (p.branch_name || 'Main Branch') === accountOrBranchFilter);
+            } else {
+                result = result.filter(p => String(p.account_id) === String(accountOrBranchFilter));
+            }
         }
 
         if (searchTerm.trim() !== '') {
@@ -254,11 +206,17 @@ const PaymentsPage = () => {
         });
 
         setFilteredPayments(result);
-    }, [searchTerm, paymentTypeFilter, methodFilter, payments]);
+    }, [searchTerm, paymentTypeFilter, methodFilter, treasuryFilter, accountOrBranchFilter, payments, accountId]);
 
     const totalRows = filteredPayments.length;
     const totalPages = Math.ceil(totalRows / rowsPerPage) || 1;
     const paginatedPayments = filteredPayments.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+
+    const updateParamsOnFilter = () => {
+        const newParams = { page: '1', limit: String(rowsPerPage) };
+        if (accountId) newParams.accountId = accountId;
+        setSearchParams(newParams);
+    };
 
     const handlePageNumberChange = (event, newPage) => {
         const newParams = { page: String(newPage), limit: String(rowsPerPage) };
@@ -281,16 +239,26 @@ const PaymentsPage = () => {
         }
     };
 
+    const getPaymentTypeLabel = (type) => {
+        switch (type) {
+            case 'invoice_payment': return t.typeInvoicePayment || (lang === 'ar' ? 'تحصيل فاتورة' : 'Invoice Payment');
+            case 'invoice_return': return t.typeInvoiceReturn || (lang === 'ar' ? 'مرتجع فاتورة' : 'Invoice Refund');
+            case 'client_credit_plus': return t.typeClientCreditPlus || (lang === 'ar' ? 'إيداع من عميل (+)' : 'Client Credit (+)');
+            case 'client_debit_minus': return t.typeClientDebitMinus || (lang === 'ar' ? 'سحب من عميل (-)' : 'Client Due (-)');
+            default: return type;
+        }
+    };
+
     const renderPaymentTypeBadge = (type) => {
         switch (type) {
             case 'invoice_payment':
-                return <Chip label={t.typeInvoicePayment || (lang === 'ar' ? 'تحصيل فاتورة' : 'Invoice Payment')} color="success" size="small" sx={{ fontWeight: 700, fontSize: '11px', height: 22 }} />;
+                return <Chip label={getPaymentTypeLabel(type)} color="success" size="small" sx={{ fontWeight: 700, fontSize: '11px', height: 22 }} />;
             case 'invoice_return':
-                return <Chip label={t.typeInvoiceReturn || (lang === 'ar' ? 'مرتجع فاتورة' : 'Invoice Return')} color="error" size="small" sx={{ fontWeight: 700, fontSize: '11px', height: 22 }} />;
+                return <Chip label={getPaymentTypeLabel(type)} color="error" size="small" sx={{ fontWeight: 700, fontSize: '11px', height: 22 }} />;
             case 'client_credit_plus':
-                return <Chip label={t.typeClientCreditPlus || (lang === 'ar' ? 'رصيد دائن (+)' : 'Client Credit (+)')} color="info" size="small" sx={{ fontWeight: 700, fontSize: '11px', height: 22 }} />;
+                return <Chip label={getPaymentTypeLabel(type)} color="info" size="small" sx={{ fontWeight: 700, fontSize: '11px', height: 22 }} />;
             case 'client_debit_minus':
-                return <Chip label={t.typeClientDebitMinus || (lang === 'ar' ? 'رصيد مدين (-)' : 'Client Due (-)')} color="warning" size="small" sx={{ fontWeight: 700, fontSize: '11px', height: 22 }} />;
+                return <Chip label={getPaymentTypeLabel(type)} color="warning" size="small" sx={{ fontWeight: 700, fontSize: '11px', height: 22 }} />;
             default:
                 return <Chip label={type} color="default" size="small" sx={{ fontWeight: 700, fontSize: '11px', height: 22 }} />;
         }
@@ -310,12 +278,13 @@ const PaymentsPage = () => {
 
     return (
         <Layout title={t.navPayments || (lang === 'ar' ? 'المدفوعات والمقبوضات' : 'Payments & Receipts')}>
-            <Box sx={{ mb: 3 }}>
+            <Box sx={{ mb: 2 }}>
                 <Button 
                     size="small" 
                     startIcon={!isRtl ? backArrow : undefined}
                     endIcon={isRtl ? backArrow : undefined}
                     onClick={handleBackNavigation}
+                    sx={{ textTransform: 'none', fontWeight: 600 }}
                 >
                     {accountId 
                         ? (lang === 'ar' ? 'العودة للوحة الفرع' : 'Back to Branch Dashboard') 
@@ -323,64 +292,112 @@ const PaymentsPage = () => {
                 </Button>
             </Box>
 
-            <Card sx={{ mb: 3, boxShadow: '0 4px 16px rgba(0,0,0,0.04)', borderRadius: 2 }}>
-                <CardContent sx={{ p: 2 }}>
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="space-between" alignItems="center">
-                        <TextField
-                            placeholder={t.searchPaymentsPlaceholder || (lang === 'ar' ? 'البحث برقم العملية، الفاتورة، العميل أو الملاحظات...' : 'Search by ID, Invoice #, or Client Name...')}
-                            value={searchTerm}
-                            onChange={(e) => { 
-                                setSearchTerm(e.target.value); 
-                                const newParams = { page: '1', limit: String(rowsPerPage) };
-                                if (accountId) newParams.accountId = accountId;
-                                setSearchParams(newParams); 
-                            }}
-                            size="small"
-                            sx={{ minWidth: 320, flexGrow: 1 }}
-                            InputProps={{
-                                startAdornment: (
-                                    <InputAdornment position="start">
-                                        <SearchIcon fontSize="small" />
-                                    </InputAdornment>
-                                ),
-                            }}
-                        />
+            <Card sx={{ mb: 2.5, boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderRadius: 2 }}>
+                <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                    <Grid container spacing={1.5} alignItems="center">
+                        <Grid item xs={12} md={3.5}>
+                            <TextField
+                                fullWidth
+                                placeholder={t.searchPaymentsPlaceholder || (lang === 'ar' ? 'البحث برقم العملية، الفاتورة، العميل...' : 'Search by ID, Invoice #, or Client...')}
+                                value={searchTerm}
+                                onChange={(e) => { 
+                                    setSearchTerm(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                                        </InputAdornment>
+                                    ),
+                                    sx: { height: 36, fontSize: '13px' }
+                                }}
+                            />
+                        </Grid>
 
-                        <Select
-                            value={paymentTypeFilter}
-                            onChange={(e) => { 
-                                setPaymentTypeFilter(e.target.value); 
-                                const newParams = { page: '1', limit: String(rowsPerPage) };
-                                if (accountId) newParams.accountId = accountId;
-                                setSearchParams(newParams); 
-                            }}
-                            size="small"
-                            sx={{ minWidth: 180 }}
-                        >
-                            <MenuItem value="ALL">{t.allPaymentTypes || (lang === 'ar' ? 'جميع أنواع المدفوعات' : 'All Payment Types')}</MenuItem>
-                            <MenuItem value="invoice_payment">{t.typeInvoicePayment || (lang === 'ar' ? 'تحصيل فاتورة' : 'Invoice Payment')}</MenuItem>
-                            <MenuItem value="invoice_return">{t.typeInvoiceReturn || (lang === 'ar' ? 'مرتجع فاتورة' : 'Invoice Return')}</MenuItem>
-                            <MenuItem value="client_credit_plus">{t.typeClientCreditPlus || (lang === 'ar' ? 'رصيد دائن (+)' : 'Client Credit (+)')}</MenuItem>
-                            <MenuItem value="client_debit_minus">{t.typeClientDebitMinus || (lang === 'ar' ? 'رصيد مدين (-)' : 'Client Due (-)')}</MenuItem>
-                        </Select>
+                        <Grid item xs={6} sm={3} md={2}>
+                            <Select
+                                fullWidth
+                                value={paymentTypeFilter}
+                                onChange={(e) => { 
+                                    setPaymentTypeFilter(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                sx={{ height: 36, fontSize: '13px' }}
+                            >
+                                <MenuItem value="ALL">{t.allPaymentTypes || (lang === 'ar' ? 'جميع أنواع المدفوعات' : 'All Types')}</MenuItem>
+                                {availablePaymentTypes.map(typeKey => (
+                                    <MenuItem key={typeKey} value={typeKey}>
+                                        {getPaymentTypeLabel(typeKey)}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </Grid>
 
-                        <Select
-                            value={methodFilter}
-                            onChange={(e) => { 
-                                setMethodFilter(e.target.value); 
-                                const newParams = { page: '1', limit: String(rowsPerPage) };
-                                if (accountId) newParams.accountId = accountId;
-                                setSearchParams(newParams); 
-                            }}
-                            size="small"
-                            sx={{ minWidth: 150 }}
-                        >
-                            <MenuItem value="ALL">{t.allMethods || (lang === 'ar' ? 'طريقة الدفع' : 'Payment Method')}</MenuItem>
-                            <MenuItem value="cash">{lang === 'ar' ? 'نقداً (Cash)' : 'Cash'}</MenuItem>
-                            <MenuItem value="bank">{lang === 'ar' ? 'تحويل بنكي' : 'Bank Transfer'}</MenuItem>
-                            <MenuItem value="client_credit">{lang === 'ar' ? 'رصيد دائن' : 'Client Credit'}</MenuItem>
-                        </Select>
-                    </Stack>
+                        <Grid item xs={6} sm={3} md={2}>
+                            <Select
+                                fullWidth
+                                value={methodFilter}
+                                onChange={(e) => { 
+                                    setMethodFilter(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                sx={{ height: 36, fontSize: '13px' }}
+                            >
+                                <MenuItem value="ALL">{t.allMethods || (lang === 'ar' ? 'طريقة الدفع' : 'Payment Method')}</MenuItem>
+                                {availableMethods.map(m => (
+                                    <MenuItem key={m} value={m} sx={{ textTransform: 'capitalize' }}>
+                                        {m === 'cash' ? (lang === 'ar' ? 'نقداً (Cash)' : 'Cash') :
+                                         m === 'bank' ? (lang === 'ar' ? 'تحويل بنكي' : 'Bank Transfer') :
+                                         m === 'client_credit' ? (lang === 'ar' ? 'رصيد دائن' : 'Client Credit') : m}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </Grid>
+
+                        <Grid item xs={6} sm={3} md={2.25}>
+                            <Select
+                                fullWidth
+                                value={treasuryFilter}
+                                onChange={(e) => { 
+                                    setTreasuryFilter(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                sx={{ height: 36, fontSize: '13px' }}
+                            >
+                                <MenuItem value="ALL">{lang === 'ar' ? 'جميع الخزائن' : 'All Treasuries'}</MenuItem>
+                                {availableTreasuries.map(tName => (
+                                    <MenuItem key={tName} value={tName}>{tName}</MenuItem>
+                                ))}
+                            </Select>
+                        </Grid>
+
+                        <Grid item xs={6} sm={3} md={2.25}>
+                            <Select
+                                fullWidth
+                                value={accountOrBranchFilter}
+                                onChange={(e) => { 
+                                    setAccountOrBranchFilter(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                sx={{ height: 36, fontSize: '13px' }}
+                            >
+                                <MenuItem value="ALL">
+                                    {accountId 
+                                        ? (lang === 'ar' ? 'جميع الفروع' : 'All Branches')
+                                        : (lang === 'ar' ? 'جميع الحسابات' : 'All Accounts')}
+                                </MenuItem>
+                                {availableAccountsOrBranches.map(item => (
+                                    <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>
+                                ))}
+                            </Select>
+                        </Grid>
+                    </Grid>
                 </CardContent>
             </Card>
 
@@ -403,14 +420,14 @@ const PaymentsPage = () => {
                                     }
                                 }}
                             >
-                                <Table size="small" sx={{ minWidth: 1200 }}>
+                                <Table size="small" sx={{ minWidth: 1100 }}>
                                     <TableHead sx={{ bgcolor: alpha(theme.palette.action.hover, 0.05) }}>
                                         <TableRow>
                                             <TableCell 
                                                 align={isRtl ? 'right' : 'left'}
                                                 sx={{ 
                                                     fontWeight: 700, 
-                                                    py: 2, 
+                                                    py: 1.5, 
                                                     px: 2,
                                                     color: 'text.primary',
                                                     ...getStickyCellStyle(true)
@@ -419,21 +436,21 @@ const PaymentsPage = () => {
                                                 # {t.paymentId || (lang === 'ar' ? 'رقم العملية' : 'Payment ID')}
                                             </TableCell>
 
-                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 140 }}>{t.paymentType || (lang === 'ar' ? 'النوع' : 'Type')}</TableCell>
-                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 170 }}>{t.referenceDoc || (lang === 'ar' ? 'الفاتورة / العميل' : 'Invoice / Client')}</TableCell>
-                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 170 }}>{t.treasuryName || (lang === 'ar' ? 'اسم الخزينة / الحساب' : 'Treasury / Account')}</TableCell>
-                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 170 }}>{t.accountAndBranch || (lang === 'ar' ? 'الحساب والفرع' : 'Account & Branch')}</TableCell>
-                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 130 }}>{t.paymentMethod || (lang === 'ar' ? 'طريقة الدفع' : 'Method')}</TableCell>
-                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 120 }}>{t.paymentDate || (lang === 'ar' ? 'تاريخ العملية' : 'Date')}</TableCell>
-                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 150 }}>{t.amount || (lang === 'ar' ? 'المبلغ' : 'Amount')}</TableCell>
-                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 180 }}>{t.notes || (lang === 'ar' ? 'الملاحظات' : 'Notes')}</TableCell>
+                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 1.5, minWidth: 130 }}>{t.paymentType || (lang === 'ar' ? 'النوع' : 'Type')}</TableCell>
+                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 1.5, minWidth: 160 }}>{t.referenceDoc || (lang === 'ar' ? 'الفاتورة / العميل' : 'Invoice / Client')}</TableCell>
+                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 1.5, minWidth: 160 }}>{t.treasuryName || (lang === 'ar' ? 'اسم الخزينة / الحساب' : 'Treasury / Account')}</TableCell>
+                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 1.5, minWidth: 160 }}>{t.accountAndBranch || (lang === 'ar' ? 'الحساب والفرع' : 'Account & Branch')}</TableCell>
+                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 1.5, minWidth: 120 }}>{t.paymentMethod || (lang === 'ar' ? 'طريقة الدفع' : 'Method')}</TableCell>
+                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 1.5, minWidth: 110 }}>{t.paymentDate || (lang === 'ar' ? 'التاريخ' : 'Date')}</TableCell>
+                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 1.5, minWidth: 140 }}>{t.amount || (lang === 'ar' ? 'المبلغ' : 'Amount')}</TableCell>
+                                            <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 1.5, minWidth: 160 }}>{t.notes || (lang === 'ar' ? 'الملاحظات' : 'Notes')}</TableCell>
                                         </TableRow>
                                     </TableHead>
                                     <TableBody>
                                         {paginatedPayments.length === 0 ? (
                                             <TableRow>
                                                 <TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>
-                                                    {t.noPaymentsFound || (lang === 'ar' ? 'لا توجد عمليات مدفوعات مسجلة لهذا الفرع.' : 'No payment transactions recorded for this branch.')}
+                                                    {t.noPaymentsFound || (lang === 'ar' ? 'لا توجد عمليات مدفوعات مسجلة.' : 'No payment transactions recorded.')}
                                                 </TableCell>
                                             </TableRow>
                                         ) : (
@@ -455,7 +472,7 @@ const PaymentsPage = () => {
                                                             className="sticky-cell"
                                                             sx={{ 
                                                                 fontWeight: 700, 
-                                                                py: 1.8, 
+                                                                py: 1.5, 
                                                                 px: 2,
                                                                 color: 'text.primary',
                                                                 ...getStickyCellStyle(false)
@@ -464,11 +481,11 @@ const PaymentsPage = () => {
                                                             #{p.daftra_payment_id || p.id}
                                                         </TableCell>
 
-                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
+                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.5 }}>
                                                             {renderPaymentTypeBadge(p.payment_type)}
                                                         </TableCell>
 
-                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 600, py: 1.8 }}>
+                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 600, py: 1.5 }}>
                                                             {p.invoice_no ? (
                                                                 <Stack direction="row" spacing={0.5} alignItems="center">
                                                                     <InvoiceIcon fontSize="small" color="action" />
@@ -490,7 +507,7 @@ const PaymentsPage = () => {
                                                             ) : '—'}
                                                         </TableCell>
 
-                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
+                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.5 }}>
                                                             {p.treasury_name ? (
                                                                 <Stack direction="row" spacing={0.5} alignItems="center">
                                                                     <TreasuryIcon fontSize="small" color="action" />
@@ -505,7 +522,7 @@ const PaymentsPage = () => {
                                                             )}
                                                         </TableCell>
 
-                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
+                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.5 }}>
                                                             <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                                                                 <Typography variant="body2" sx={{ fontSize: '13px', fontWeight: 600, color: 'text.primary' }}>
                                                                     {p.account_name || '—'}
@@ -518,7 +535,7 @@ const PaymentsPage = () => {
                                                             </Box>
                                                         </TableCell>
 
-                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
+                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.5 }}>
                                                             <Chip 
                                                                 label={p.payment_method || 'cash'} 
                                                                 variant="outlined" 
@@ -527,11 +544,11 @@ const PaymentsPage = () => {
                                                             />
                                                         </TableCell>
 
-                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontSize: '12px', color: 'text.secondary', py: 1.8 }}>
+                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontSize: '12px', color: 'text.secondary', py: 1.5 }}>
                                                             <bdi>{p.payment_date ? new Date(p.payment_date).toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-US') : '—'}</bdi>
                                                         </TableCell>
 
-                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8 }}>
+                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.5 }}>
                                                             <CurrencyDisplay
                                                                 amount={p.amount}
                                                                 baseAmount={p.base_amount}
@@ -546,7 +563,7 @@ const PaymentsPage = () => {
                                                             />
                                                         </TableCell>
 
-                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.8, color: 'text.secondary', fontSize: '12px' }}>
+                                                        <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 1.5, color: 'text.secondary', fontSize: '12px' }}>
                                                             {p.notes || '—'}
                                                         </TableCell>
                                                     </TableRow>
@@ -557,11 +574,12 @@ const PaymentsPage = () => {
                                 </Table>
                             </TableContainer>
 
+                            {/* 🎯 FOOTER PAGINATION */}
                             <Box 
                                 sx={{ 
                                     display: 'flex', 
                                     alignItems: 'center', 
-                                    justify: 'space-between', 
+                                    justifyContent: 'space-between',
                                     p: 2, 
                                     flexWrap: 'wrap',
                                     gap: 2,
@@ -601,6 +619,7 @@ const PaymentsPage = () => {
                                         shape="rounded"
                                         showFirstButton
                                         showLastButton
+                                        dir={isRtl ? 'rtl' : 'ltr'}
                                     />
                                 </Box>
                             </Box>

@@ -14,7 +14,7 @@ const { getUserCurrencyContext, convertToActiveCurrency } = require('../utils/cu
  */
 const getGlobalRecentWidgets = async (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان: استخراج من التوكن فقط
         const { targetCurrency } = req.query;
 
         const currencyContext = await getUserCurrencyContext(userId);
@@ -76,14 +76,15 @@ const getGlobalRecentWidgets = async (req, res) => {
 const getBranchRecentWidgets = async (req, res) => {
     try {
         const { accountId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان: التحقق من التوكن
         const { targetCurrency } = req.query;
 
-        const accUserRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1', [accountId]);
+        // 🎯 أمان: التحقق من ملكية الحساب
+        const accUserRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
         if (accUserRes.rows.length === 0) {
-            return res.status(404).json({ error: 'Branch account not found' });
+            return res.status(403).json({ error: 'Unauthorized or Branch account not found' });
         }
 
-        const userId = accUserRes.rows[0].user_id;
         const accountBaseCurrency = (accUserRes.rows[0].currency_code || 'EGP').toUpperCase().trim();
 
         const currencyContext = await getUserCurrencyContext(userId);
@@ -132,16 +133,15 @@ const getBranchRecentWidgets = async (req, res) => {
  */
 const getRecentSalesWidget = async (req, res) => {
     try {
-        let { userId, accountId, targetCurrency } = req.query;
+        let { accountId, targetCurrency } = req.query;
+        const userId = req.user.userId; // 🎯 أمان
 
-        // 1. استخراج userId تلقائياً من accountId لو مش ممرر
-        if (!userId && accountId) {
-            const accUserRes = await pool.query('SELECT user_id FROM linked_accounts WHERE id = $1::int', [parseInt(accountId, 10)]);
-            userId = accUserRes.rows[0]?.user_id;
-        }
-
-        if (!userId && !accountId) {
-            return res.status(400).json({ error: "Either userId or accountId is required" });
+        // 🎯 أمان: التحقق من ملكية الحساب إذا تم تمريره
+        if (accountId) {
+            const accUserRes = await pool.query('SELECT user_id FROM linked_accounts WHERE id = $1::int AND user_id = $2::int', [parseInt(accountId, 10), parseInt(userId, 10)]);
+            if (accUserRes.rows.length === 0) {
+                return res.status(403).json({ error: "Unauthorized" });
+            }
         }
 
         const currencyContext = userId ? await getUserCurrencyContext(userId) : { exchangeRates: {} };
@@ -249,17 +249,18 @@ const getRecentSalesWidget = async (req, res) => {
  */
 const getLedgersPaginated = async (req, res) => {
     try {
-        const { userId, accountId, page = 1, limit = 10, targetCurrency } = req.query; 
+        const userId = req.user.userId; // 🎯 أمان
+        const { accountId, page = 1, limit = 10, targetCurrency } = req.query; 
         const parsedLimit = parseInt(limit, 10);
         const offset = (parseInt(page, 10) - 1) * parsedLimit;
 
-        let effectiveUserId = userId;
-        if (!effectiveUserId && accountId) {
-            const accUserRes = await pool.query('SELECT user_id FROM linked_accounts WHERE id = $1::int', [parseInt(accountId, 10)]);
-            effectiveUserId = accUserRes.rows[0]?.user_id;
+        // 🎯 أمان
+        if (accountId) {
+            const accUserRes = await pool.query('SELECT user_id FROM linked_accounts WHERE id = $1::int AND user_id = $2::int', [parseInt(accountId, 10), parseInt(userId, 10)]);
+            if (accUserRes.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
         }
 
-        const currencyContext = effectiveUserId ? await getUserCurrencyContext(effectiveUserId) : { exchangeRates: {} };
+        const currencyContext = await getUserCurrencyContext(userId);
         const isUnified = !!(targetCurrency && targetCurrency !== 'DEFAULT');
         const activeCurrency = isUnified ? targetCurrency.toUpperCase().trim() : 'DEFAULT';
 
@@ -392,17 +393,18 @@ const getLedgersPaginated = async (req, res) => {
  */
 const getClientsPaginated = async (req, res) => {
     try {
-        const { userId, accountId, page = 1, limit = 10, targetCurrency } = req.query; 
+        const userId = req.user.userId; // 🎯 أمان
+        const { accountId, page = 1, limit = 10, targetCurrency } = req.query; 
         const parsedLimit = parseInt(limit, 10);
         const offset = (parseInt(page, 10) - 1) * parsedLimit;
 
-        let effectiveUserId = userId;
-        if (!effectiveUserId && accountId) {
-            const accUserRes = await pool.query('SELECT user_id FROM linked_accounts WHERE id = $1', [accountId]);
-            effectiveUserId = accUserRes.rows[0]?.user_id;
+        // 🎯 أمان
+        if (accountId) {
+            const accUserRes = await pool.query('SELECT user_id FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
+            if (accUserRes.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
         }
 
-        const currencyContext = effectiveUserId ? await getUserCurrencyContext(effectiveUserId) : { exchangeRates: {} };
+        const currencyContext = await getUserCurrencyContext(userId);
         const isUnified = !!(targetCurrency && targetCurrency !== 'DEFAULT');
         const activeCurrency = isUnified ? targetCurrency.toUpperCase().trim() : 'DEFAULT';
 
@@ -510,14 +512,16 @@ const getClientsPaginated = async (req, res) => {
 const getClientStatementHtml = async (req, res) => {
     try {
         const { accountId, clientId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
 
+        // 🎯 أمان: تأمين جلب كشف الحساب
         const accountResult = await pool.query(
-            'SELECT daftra_subdomain, encrypted_access_token FROM linked_accounts WHERE id = $1;',
-            [accountId]
+            'SELECT daftra_subdomain, encrypted_access_token FROM linked_accounts WHERE id = $1 AND user_id = $2;',
+            [accountId, userId]
         );
 
         if (accountResult.rows.length === 0) {
-            return res.status(404).send('<h3>حساب دفترة غير موجود</h3>');
+            return res.status(403).send('<h3>حساب دفترة غير موجود أو غير مصرح لك بالوصول إليه</h3>');
         }
 
         const { daftra_subdomain: subdomain, encrypted_access_token: token } = accountResult.rows[0];
@@ -561,7 +565,7 @@ const getClientStatementHtml = async (req, res) => {
  */
 const getGlobalAnalytics = async (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
         const { targetCurrency } = req.query;
 
         const currencyContext = await getUserCurrencyContext(userId);
@@ -836,14 +840,15 @@ const getGlobalAnalytics = async (req, res) => {
 const getBranchAnalytics = async (req, res) => {
     try {
         const { accountId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
         const { currency, targetCurrency } = req.query;
 
-        const accountRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1;', [accountId]);
+        // 🎯 أمان
+        const accountRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1 AND user_id = $2;', [accountId, userId]);
         if (accountRes.rows.length === 0) {
-            return res.status(404).json({ error: "Branch account not found" });
+            return res.status(403).json({ error: "Unauthorized or Branch account not found" });
         }
 
-        const userId = accountRes.rows[0].user_id;
         const accountBaseCurrency = (accountRes.rows[0].currency_code || 'EGP').toUpperCase().trim();
 
         const currencyContext = await getUserCurrencyContext(userId);
@@ -1014,7 +1019,7 @@ const getBranchAnalytics = async (req, res) => {
  */
 const getSummary = async (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
         const { targetCurrency } = req.query;
 
         const currencyContext = await getUserCurrencyContext(userId);
@@ -1135,14 +1140,14 @@ const getSummary = async (req, res) => {
 const getBranchSummary = async (req, res) => {
     try {
         const { accountId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
         const { targetCurrency } = req.query;
 
-        const accountRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1;', [accountId]);
+        const accountRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1 AND user_id = $2;', [accountId, userId]);
         if (accountRes.rows.length === 0) {
-            return res.status(404).json({ error: "Branch account not found" });
+            return res.status(403).json({ error: "Unauthorized or Branch account not found" });
         }
 
-        const userId = accountRes.rows[0].user_id;
         const accountBaseCurrency = (accountRes.rows[0].currency_code || 'EGP').toUpperCase().trim();
 
         const currencyContext = await getUserCurrencyContext(userId);
@@ -1236,6 +1241,14 @@ const getBranchSummary = async (req, res) => {
  */
 const getBranchTransactions = async (req, res) => {
     try {
+        const { accountId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
+
+        // 🎯 أمان
+        const checkAuth = await pool.query('SELECT 1 FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
+        if (checkAuth.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
+
+        // 🎯 أمان السيرفر (LIMIT 100) لمنع Crash
         const result = await pool.query(`
             SELECT id, invoice_no AS doc_number, 'invoice' AS origin, base_net_revenue AS total_amount, currency_code, issue_date AS date 
             FROM invoices_cache WHERE account_id = $1
@@ -1245,8 +1258,9 @@ const getBranchTransactions = async (req, res) => {
             UNION ALL
             SELECT id, journal_id::text AS doc_number, entity_type AS origin, (CASE WHEN entity_type = 'income' THEN debit ELSE credit END) AS total_amount, currency_code, transaction_date AS date 
             FROM treasury_transactions_cache WHERE account_id = $1 AND entity_type IN ('income', 'expense')
-            ORDER BY date DESC;
-        `, [req.params.accountId]);
+            ORDER BY date DESC
+            LIMIT 100;
+        `, [accountId]);
         res.json(result.rows);
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
@@ -1255,7 +1269,7 @@ const getBranchTransactions = async (req, res) => {
  * 💳 10.1 Fetch All Payments for a User (فصل العملة الأصلية عن الأساسية بالمدفوعات + التصفية بالفرع)
  */
 const getUserPayments = async (req, res) => {
-    const { userId } = req.params;
+    const userId = req.user.userId; // 🎯 أمان
     const { targetCurrency, accountId } = req.query;
 
     try {
@@ -1267,6 +1281,10 @@ const getUserPayments = async (req, res) => {
         let queryParams = [parseInt(userId, 10)];
 
         if (accountId && accountId !== 'null' && accountId !== 'undefined') {
+            // 🎯 أمان إضافي للفرع
+            const checkAuth = await pool.query('SELECT 1 FROM linked_accounts WHERE id = $1 AND user_id = $2', [parseInt(accountId, 10), parseInt(userId, 10)]);
+            if (checkAuth.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
+
             accountFilter += ` AND p.account_id = $2::int`;
             queryParams.push(parseInt(accountId, 10));
         }
@@ -1309,7 +1327,8 @@ const getUserPayments = async (req, res) => {
                       OR TRIM(p.treasury_id::text) = TRIM(tc.journal_account_id::text)
                   )
             ${accountFilter}
-            ORDER BY p.payment_date DESC, p.daftra_payment_id DESC, p.id DESC;
+            ORDER BY p.payment_date DESC, p.daftra_payment_id DESC, p.id DESC
+            LIMIT 1000; -- 🎯 أمان الذاكرة
         `;
         const result = await pool.query(query, queryParams);
 
@@ -1341,11 +1360,12 @@ const getUserPayments = async (req, res) => {
  */
 const syncBranch = async (req, res) => {
     const { accountId } = req.params;
+    const userId = req.user.userId; // 🎯 أمان
     try {
-        const accountResult = await pool.query('SELECT user_id, daftra_subdomain, encrypted_access_token FROM linked_accounts WHERE id = $1;', [accountId]);
-        if (accountResult.rows.length === 0) return res.status(404).json({ error: "Target linked branch account mapping node not found." });
+        const accountResult = await pool.query('SELECT user_id, daftra_subdomain, encrypted_access_token FROM linked_accounts WHERE id = $1 AND user_id = $2;', [accountId, userId]);
+        if (accountResult.rows.length === 0) return res.status(404).json({ error: "Target linked branch account mapping node not found or unauthorized." });
 
-        const { user_id: userId, daftra_subdomain: subdomain, encrypted_access_token: token } = accountResult.rows[0];
+        const { daftra_subdomain: subdomain, encrypted_access_token: token } = accountResult.rows[0];
         const cleanSubdomain = subdomain.replace('https://', '').replace('http://', '').split('.')[0];
         const config = { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' } };
 
@@ -1369,7 +1389,7 @@ const syncBranch = async (req, res) => {
  * 🔁 12. Trigger Background Bulk Sync for All User Linked Accounts
  */
 const syncAll = async (req, res) => {
-    const userId = req.params.userId || req.body.userId;
+    const userId = req.user.userId; // 🎯 أمان
     try {
         const accountsResult = await pool.query('SELECT id FROM linked_accounts WHERE user_id = $1;', [userId]);
         if (accountsResult.rows.length === 0) return res.status(200).json({ message: "No connected accounts found to synchronize." });
@@ -1396,13 +1416,14 @@ const syncAll = async (req, res) => {
 const syncFinancialReportOnly = async (req, res) => {
     try {
         const { accountId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
         const accountResult = await pool.query(
-            'SELECT user_id, daftra_subdomain, encrypted_access_token FROM linked_accounts WHERE id = $1;',
-            [accountId]
+            'SELECT user_id, daftra_subdomain, encrypted_access_token FROM linked_accounts WHERE id = $1 AND user_id = $2;',
+            [accountId, userId]
         );
 
         if (accountResult.rows.length === 0) {
-            return res.status(404).json({ error: "Linked account mapping node not found." });
+            return res.status(404).json({ error: "Linked account mapping node not found or unauthorized." });
         }
 
         const { daftra_subdomain: subdomain, encrypted_access_token: token } = accountResult.rows[0];
@@ -1424,10 +1445,16 @@ const syncFinancialReportOnly = async (req, res) => {
 const getTreasuryDailyTotals = async (req, res) => {
     try {
         const { accountId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
+
+        const checkAuth = await pool.query('SELECT 1 FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
+        if (checkAuth.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
+
         const result = await pool.query(`
             SELECT 
                 dt.id,
-                dt.record_date,
+                dt.account_id,
+                dt.journal_account_id,
                 dt.opening_balance,
                 dt.today_inflow,
                 dt.today_outflow,
@@ -1454,7 +1481,7 @@ const getTreasuryDailyTotals = async (req, res) => {
  */
 const getUserTreasuries = async (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
         const { accountId, targetCurrency } = req.query;
 
         const currencyContext = await getUserCurrencyContext(userId);
@@ -1482,6 +1509,10 @@ const getUserTreasuries = async (req, res) => {
         const queryParams = [userId];
 
         if (accountId) {
+            // 🎯 أمان إضافي
+            const checkAuth = await pool.query('SELECT 1 FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
+            if (checkAuth.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
+
             query += ` AND tc.account_id = $2`;
             queryParams.push(accountId);
         }
@@ -1515,6 +1546,7 @@ const getUserTreasuries = async (req, res) => {
 const getTreasuryHeader = async (req, res) => {
     try {
         const { accountId, journalAccountId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
         const { targetCurrency } = req.query;
 
         const query = `
@@ -1534,11 +1566,11 @@ const getTreasuryHeader = async (req, res) => {
             FROM treasuries_cache tc
             JOIN linked_accounts la ON tc.account_id = la.id
             LEFT JOIN branches_cache bc ON tc.account_id = bc.account_id AND tc.branch_id = bc.daftra_branch_id
-            WHERE tc.account_id = $1 AND tc.journal_account_id = $2;
+            WHERE tc.account_id = $1 AND tc.journal_account_id = $2 AND la.user_id = $3; -- 🎯 أمان
         `;
-        const result = await pool.query(query, [accountId, journalAccountId]);
+        const result = await pool.query(query, [accountId, journalAccountId, userId]);
         if (result.rows.length === 0) {
-            return res.status(404).json({ error: "Treasury not found" });
+            return res.status(404).json({ error: "Treasury not found or unauthorized" });
         }
 
         const treasury = result.rows[0];
@@ -1571,13 +1603,16 @@ const getTreasuryHeader = async (req, res) => {
 const getTreasuryTransactionsPaginated = async (req, res) => {
     try {
         const { accountId, journalAccountId } = req.params;
+        const userId = req.user.userId; // 🎯 أمان
         const { page = 1, limit = 20, targetCurrency } = req.query;
         const parsedLimit = parseInt(limit, 10);
         const parsedPage = parseInt(page, 10);
         const offset = (parsedPage - 1) * parsedLimit;
 
-        const accUserRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1', [accountId]);
-        const userId = accUserRes.rows[0]?.user_id;
+        // 🎯 أمان
+        const accUserRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
+        if (accUserRes.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
+
         const accountBaseCurrency = (accUserRes.rows[0]?.currency_code || 'EGP').toUpperCase().trim();
 
         const currencyContext = userId ? await getUserCurrencyContext(userId) : { exchangeRates: {} };

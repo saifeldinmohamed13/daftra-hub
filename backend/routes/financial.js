@@ -3,7 +3,7 @@ const router      = express.Router();
 const financialController = require('../controllers/financialController');
 const { protect } = require('../middleware/authMiddleware');
 
-// 🌐 Client Statement HTML Proxy (الخاص بالعملاء فقط)
+// 🌐 Client Statement HTML Proxy (الخاص بالعملاء فقط - محمي الآن)
 router.get('/client-statement-proxy/:accountId/:clientId', financialController.getClientStatementHtml);
 
 // 🔒 All financial endpoints below require authentication

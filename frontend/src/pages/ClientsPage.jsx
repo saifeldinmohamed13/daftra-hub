@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
     Box,
@@ -23,6 +23,9 @@ import {
     DialogTitle,
     DialogContent,
     IconButton,
+    TextField,
+    InputAdornment,
+    Grid,
     useTheme,
     alpha
 } from '@mui/material';
@@ -31,119 +34,14 @@ import {
     DescriptionRounded as StatementIcon,
     PhoneRounded as PhoneIcon,
     EmailRounded as EmailIcon,
-    CloseRounded as CloseIcon
+    CloseRounded as CloseIcon,
+    Search as SearchIcon
 } from '@mui/icons-material';
 import API from '../services/api';
 import Layout from '../components/Layout';
+import CurrencyDisplay from '../components/CurrencyDisplay';
 import { useLanguage } from '../LanguageContext';
-import { getCurrencySymbol, getCurrencyFullName } from '../i18n/currencies';
-
-const formatCurrency = (val) => {
-    const num = parseFloat(val || 0);
-    return num.toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-};
-
-// 💳 Component for Dual-Currency Display
-const CurrencyDisplay = ({
-    amount,
-    baseAmount,
-    currencyCode,
-    baseCurrencyCode,
-    isUnified = false,
-    displayCurrency,
-    lang,
-    isBold = false,
-    color = 'text.primary',
-    size = 'body2'
-}) => {
-    const activeCurr = (isUnified ? displayCurrency : (baseCurrencyCode || currencyCode || 'EGP')).toUpperCase();
-    const cliCurr = (currencyCode || 'EGP').toUpperCase();
-
-    const origVal = parseFloat(amount || 0);
-    const baseVal = baseAmount !== undefined && baseAmount !== null 
-        ? parseFloat(baseAmount || 0) 
-        : origVal;
-
-    let calculatedRate = 1;
-    if (origVal !== 0 && baseVal !== 0 && Math.abs(origVal - baseVal) > 0.001) {
-        calculatedRate = Math.abs(baseVal / origVal);
-    }
-
-    const isForeign = !isUnified && (cliCurr !== activeCurr);
-
-    const origFullName = getCurrencyFullName(cliCurr, lang);
-    const activeFullName = getCurrencyFullName(activeCurr, lang);
-    
-    const origSymbol = getCurrencySymbol(cliCurr, lang);
-    const activeSymbol = getCurrencySymbol(activeCurr, lang);
-
-    const fontSize = size === 'caption' ? '11px' : '13px';
-    const subFontSize = size === 'caption' ? '9.5px' : '11px';
-
-    if (!isForeign) {
-        return (
-            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant={size} sx={{ fontSize, fontWeight: isBold ? 700 : 500, color }}>
-                    <bdi>{formatCurrency(baseVal)}</bdi>
-                </Typography>
-                <Tooltip title={activeFullName} arrow placement="top">
-                    <Typography
-                        component="span"
-                        variant={size}
-                        sx={{
-                            fontSize,
-                            fontWeight: isBold ? 700 : 600,
-                            color: color !== 'text.primary' ? color : 'text.secondary',
-                            cursor: 'pointer',
-                        }}
-                    >
-                        ({activeSymbol})
-                    </Typography>
-                </Tooltip>
-            </Box>
-        );
-    }
-
-    const tooltipTitle = `1 ${origSymbol} = ${formatCurrency(calculatedRate)} ${activeSymbol} (${activeFullName})`;
-
-    return (
-        <Box sx={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1.2 }}>
-            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant={size} sx={{ fontSize, fontWeight: isBold ? 700 : 600, color }}>
-                    <bdi>{formatCurrency(baseVal)}</bdi>
-                </Typography>
-                <Tooltip title={activeFullName} arrow placement="top">
-                    <Typography
-                        component="span"
-                        variant={size}
-                        sx={{ fontSize, fontWeight: 700, color: color !== 'text.primary' ? color : 'text.secondary', cursor: 'pointer' }}
-                    >
-                        ({activeSymbol})
-                    </Typography>
-                </Tooltip>
-            </Box>
-
-            <Tooltip title={tooltipTitle} arrow placement="top">
-                <Typography
-                    variant="caption"
-                    sx={{
-                        fontSize: subFontSize,
-                        color: color !== 'text.primary' ? color : 'text.secondary',
-                        fontWeight: 500,
-                        cursor: 'pointer',
-                        width: 'fit-content',
-                        mt: 0.1
-                    }}
-                >
-                    <bdi>{formatCurrency(origVal)}</bdi> ({origSymbol})
-                </Typography>
-            </Tooltip>
-        </Box>
-    );
-};
+import { getCurrencyFullName } from '../i18n/currencies';
 
 const ClientsPage = () => {
     const navigate = useNavigate();
@@ -160,7 +58,9 @@ const ClientsPage = () => {
 
     const [loading, setLoading] = useState(true);
     const [clients, setClients] = useState([]);
-    const [totalRows, setTotalRows] = useState(0);
+
+    const [searchTerm, setSearchTerm] = useState('');
+    const [accountOrBranchFilter, setAccountOrBranchFilter] = useState('ALL');
 
     const [statementModal, setStatementModal] = useState({
         open: false,
@@ -168,9 +68,6 @@ const ClientsPage = () => {
         statementUrl: '',
     });
 
-    const totalPages = Math.ceil(totalRows / rowsPerPage) || 1;
-
-    // جلب حالة وتفعيل العملة الموحدة من السيرفر والـ LocalStorage
     const fetchCurrencySettings = useCallback(async () => {
         try {
             const res = await API.get(`/currency/settings/${userId}`);
@@ -187,30 +84,28 @@ const ClientsPage = () => {
         }
     }, [userId]);
 
-    const fetchPaginatedClients = useCallback(async () => {
+    const fetchClients = useCallback(async () => {
         setLoading(true);
         try {
             const currentTargetCurr = await fetchCurrencySettings();
 
             const params = {
-                page: page,
-                limit: rowsPerPage,
                 userId: accountId ? undefined : userId,
                 accountId: accountId || undefined,
-                targetCurrency: currentTargetCurr !== 'DEFAULT' ? currentTargetCurr : undefined
+                targetCurrency: currentTargetCurr !== 'DEFAULT' ? currentTargetCurr : undefined,
+                limit: 1000
             };
 
             const response = await API.get('/financial/clients/paginated', { params });
             if (response.data) {
                 setClients(response.data.data || []);
-                setTotalRows(response.data.pagination?.totalRows || 0);
             }
         } catch (err) {
             console.error('Failed compiling matrix directory node for clients:', err);
         } finally {
             setLoading(false);
         }
-    }, [accountId, userId, page, rowsPerPage, fetchCurrencySettings]);
+    }, [accountId, userId, fetchCurrencySettings]);
 
     useEffect(() => {
         if (userId) {
@@ -221,9 +116,64 @@ const ClientsPage = () => {
                     limit: String(rowsPerPage)
                 }, { replace: true });
             }
-            fetchPaginatedClients();
+            fetchClients();
         }
-    }, [searchParams, userId, page, rowsPerPage, fetchPaginatedClients]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams, userId, fetchClients, accountId, page, rowsPerPage]);
+
+    const availableAccountsOrBranches = useMemo(() => {
+        const map = new Map();
+        clients.forEach(cli => {
+            if (accountId) {
+                const branchKey = cli.branch_name || cli.branch_id || 'Main Branch';
+                if (!map.has(branchKey)) {
+                    map.set(branchKey, cli.branch_name || (lang === 'ar' ? 'الفرع الرئيسي' : 'Main Branch'));
+                }
+            } else {
+                if (cli.account_id && !map.has(String(cli.account_id))) {
+                    map.set(String(cli.account_id), cli.account_name || `Account #${cli.account_id}`);
+                }
+            }
+        });
+        return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    }, [clients, accountId, lang]);
+
+    const filteredClients = useMemo(() => {
+        let result = [...clients];
+
+        if (accountOrBranchFilter !== 'ALL') {
+            if (accountId) {
+                result = result.filter(cli => (cli.branch_name || 'Main Branch') === accountOrBranchFilter);
+            } else {
+                result = result.filter(cli => String(cli.account_id) === String(accountOrBranchFilter));
+            }
+        }
+
+        if (searchTerm.trim() !== '') {
+            const term = searchTerm.toLowerCase();
+            result = result.filter(cli =>
+                (cli.client_name && cli.client_name.toLowerCase().includes(term)) ||
+                (cli.client_email && cli.client_email.toLowerCase().includes(term)) ||
+                (cli.client_phone && cli.client_phone.toLowerCase().includes(term)) ||
+                (cli.account_name && cli.account_name.toLowerCase().includes(term)) ||
+                (cli.branch_name && cli.branch_name.toLowerCase().includes(term))
+            );
+        }
+
+        return result;
+    }, [clients, accountOrBranchFilter, searchTerm, accountId]);
+
+    const totalRows = filteredClients.length;
+    const totalPages = Math.ceil(totalRows / rowsPerPage) || 1;
+    const paginatedClients = filteredClients.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+
+    const updateParamsOnFilter = () => {
+        setSearchParams({
+            accountId: accountId || '',
+            page: '1',
+            limit: String(rowsPerPage)
+        });
+    };
 
     const handlePageNumberChange = (event, newPage) => {
         setSearchParams({
@@ -265,7 +215,6 @@ const ClientsPage = () => {
 
     const backArrow = <ArrowBackIcon sx={isRtl ? { transform: 'scaleX(-1)' } : undefined} />;
 
-    // 🎯 تنظيف العمود الثابت وإلغاء الشادو خلفه
     const getStickyCellStyle = (isHeader = false) => ({
         position: 'sticky',
         insetInlineStart: 0,
@@ -277,17 +226,67 @@ const ClientsPage = () => {
     });
 
     return (
-        <Layout title={t.allClientsTitle || (lang === 'ar' ? 'دليل العملاء الرئيسي' : 'Master Clients Directory')}>
-            <Box sx={{ mb: 3 }}>
+        <Layout title={t.allClientsTitle || 'Master Clients Directory'}>
+            <Box sx={{ mb: 2 }}>
                 <Button 
                     size="small" 
                     startIcon={!isRtl ? backArrow : undefined}
                     endIcon={isRtl ? backArrow : undefined}
                     onClick={handleBackNavigation}
+                    sx={{ textTransform: 'none', fontWeight: 600 }}
                 >
-                    {accountId ? (t.backToBranch || (lang === 'ar' ? 'العودة للفرع' : 'Back to Branch')) : (t.backToGlobalWorkspace || (lang === 'ar' ? 'العودة للوحة الرئيسية' : 'Back to Dashboard'))}
+                    {accountId ? t.backToBranch : t.backToGlobalWorkspace}
                 </Button>
             </Box>
+
+            <Card sx={{ mb: 2.5, boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderRadius: 2 }}>
+                <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                    <Grid container spacing={1.5} alignItems="center">
+                        <Grid item xs={12} sm={8} md={8}>
+                            <TextField
+                                fullWidth
+                                placeholder={lang === 'ar' ? 'البحث باسم العميل، الهاتف، البريد الإلكتروني...' : 'Search by Client Name, Phone, Email...'}
+                                value={searchTerm}
+                                onChange={(e) => { 
+                                    setSearchTerm(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                                        </InputAdornment>
+                                    ),
+                                    sx: { height: 36, fontSize: '13px' }
+                                }}
+                            />
+                        </Grid>
+
+                        <Grid item xs={12} sm={4} md={4}>
+                            <Select
+                                fullWidth
+                                value={accountOrBranchFilter}
+                                onChange={(e) => { 
+                                    setAccountOrBranchFilter(e.target.value); 
+                                    updateParamsOnFilter();
+                                }}
+                                size="small"
+                                sx={{ height: 36, fontSize: '13px' }}
+                            >
+                                <MenuItem value="ALL">
+                                    {accountId 
+                                        ? (lang === 'ar' ? 'جميع الفروع' : 'All Branches')
+                                        : (lang === 'ar' ? 'جميع الحسابات' : 'All Accounts')}
+                                </MenuItem>
+                                {availableAccountsOrBranches.map(item => (
+                                    <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>
+                                ))}
+                            </Select>
+                        </Grid>
+                    </Grid>
+                </CardContent>
+            </Card>
 
             <Card sx={{ boxShadow: '0 4px 16px rgba(0,0,0,0.04)', borderRadius: 2 }}>
                 <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
@@ -298,7 +297,6 @@ const ClientsPage = () => {
                             <TableContainer 
                                 component={Paper} 
                                 elevation={0} 
-                                dir={isRtl ? 'rtl' : 'ltr'}
                                 sx={{ 
                                     borderRadius: 0, 
                                     overflowX: 'auto',
@@ -322,47 +320,40 @@ const ClientsPage = () => {
                                                     ...getStickyCellStyle(true)
                                                 }}
                                             >
-                                                {t.clientName || (lang === 'ar' ? 'اسم العميل' : 'Client Name')}
+                                                {t.clientName}
                                             </TableCell>
-
                                             <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 170 }}>
-                                                {!accountId ? (t.accountAndBranch || (lang === 'ar' ? 'الحساب / الفرع' : 'Workspace / Branch')) : (t.branchLabel || (lang === 'ar' ? 'الفرع' : 'Branch'))}
+                                                {!accountId ? t.accountAndBranch : t.branchLabel}
                                             </TableCell>
-
                                             <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 180 }}>
-                                                {t.clientTotalInvoiced || (lang === 'ar' ? 'إجمالي المبيعات' : 'Total Invoiced')}
+                                                {t.clientTotalInvoiced}
                                             </TableCell>
-
                                             <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 200 }}>
-                                                {t.clientFinancialSummary || (lang === 'ar' ? 'الملخص المالي للعميل' : 'Financial Balance')}
+                                                {t.clientFinancialSummary}
                                             </TableCell>
-
                                             <TableCell align="center" sx={{ fontWeight: 700, py: 2, minWidth: 160 }}>
-                                                {t.status || (lang === 'ar' ? 'الحالة' : 'Status')}
+                                                {t.status}
                                             </TableCell>
-
                                             <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, minWidth: 120 }}>
-                                                {t.currency || (lang === 'ar' ? 'عملة العميل' : 'Currency')}
+                                                {t.currency}
                                             </TableCell>
-
                                             <TableCell align={isRtl ? 'right' : 'left'} sx={{ fontWeight: 700, py: 2, px: 2, minWidth: 130 }}>
-                                                {t.createdAt || (lang === 'ar' ? 'تاريخ الإضافة' : 'Created At')}
+                                                {t.createdAt}
                                             </TableCell>
-
                                             <TableCell align="center" sx={{ fontWeight: 700, py: 2, px: 2, minWidth: 120 }}>
-                                                {t.action || (lang === 'ar' ? 'الإجراءات' : 'Action')}
+                                                {t.action}
                                             </TableCell>
                                         </TableRow>
                                     </TableHead>
                                     <TableBody>
-                                        {clients.length === 0 ? (
+                                        {paginatedClients.length === 0 ? (
                                             <TableRow>
                                                 <TableCell colSpan={8} align="center" sx={{ py: 6, color: 'text.secondary' }}>
-                                                    {t.noClients || (lang === 'ar' ? 'لا يوجد عملاء مسجلين' : 'No clients found')}
+                                                    {t.noClients}
                                                 </TableCell>
                                             </TableRow>
                                         ) : (
-                                            clients.map((cli) => {
+                                            paginatedClients.map((cli) => {
                                                 const overdueCount = parseInt(cli.overdue_count || 0, 10);
                                                 const returnedVal = parseFloat(cli.total_returned || 0);
 
@@ -416,17 +407,16 @@ const ClientsPage = () => {
                                                                         {cli.account_name}
                                                                     </Typography>
                                                                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: '11px' }}>
-                                                                        {cli.branch_name || t.defaultBranchName || (lang === 'ar' ? 'الفرع الرئيسي' : 'Main Branch')}
+                                                                        {cli.branch_name || t.defaultBranchName}
                                                                     </Typography>
                                                                 </Box>
                                                             ) : (
                                                                 <Typography variant="body2" color="text.secondary" sx={{ fontSize: '13px' }}>
-                                                                    {cli.branch_name || t.defaultBranchName || (lang === 'ar' ? 'الفرع الرئيسي' : 'Main Branch')}
+                                                                    {cli.branch_name || t.defaultBranchName}
                                                                 </Typography>
                                                             )}
                                                         </TableCell>
 
-                                                        {/* TOTAL INVOICED DUAL CURRENCY */}
                                                         <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 2 }}>
                                                             <CurrencyDisplay
                                                                 amount={cli.orig_total_invoiced || cli.total_invoiced}
@@ -440,12 +430,11 @@ const ClientsPage = () => {
                                                             />
                                                         </TableCell>
 
-                                                        {/* FINANCIAL BALANCE DUAL CURRENCY */}
                                                         <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 2 }}>
                                                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.3 }}>
                                                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                                                     <Typography variant="caption" color="success.main" sx={{ fontWeight: 600, fontSize: '11px' }}>
-                                                                        {t.paidLabel || (lang === 'ar' ? 'المحصل' : 'Paid')}:
+                                                                        {t.paidLabel}:
                                                                     </Typography>
                                                                     <CurrencyDisplay
                                                                         amount={cli.orig_total_paid || cli.total_paid}
@@ -463,7 +452,7 @@ const ClientsPage = () => {
                                                                 {returnedVal > 0 && (
                                                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                                                         <Typography variant="caption" color="error.main" sx={{ fontWeight: 600, fontSize: '11px' }}>
-                                                                            {t.statusReturned || (lang === 'ar' ? 'مرتجع' : 'Returned')}:
+                                                                            {t.statusReturned}:
                                                                         </Typography>
                                                                         <CurrencyDisplay
                                                                             amount={returnedVal}
@@ -481,7 +470,7 @@ const ClientsPage = () => {
 
                                                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                                                     <Typography variant="caption" color="warning.main" sx={{ fontWeight: 600, fontSize: '11px' }}>
-                                                                        {t.unpaidLabel || (lang === 'ar' ? 'المتبقي' : 'Due')}:
+                                                                        {t.unpaidLabel}:
                                                                     </Typography>
                                                                     <CurrencyDisplay
                                                                         amount={cli.orig_total_unpaid || cli.total_unpaid}
@@ -501,7 +490,7 @@ const ClientsPage = () => {
                                                         <TableCell align="center" sx={{ py: 2 }}>
                                                             {overdueCount > 0 ? (
                                                                 <Chip 
-                                                                    label={typeof t.overdueInvoicesBadge === 'function' ? t.overdueInvoicesBadge(overdueCount) : `${overdueCount} ${lang === 'ar' ? 'متأخرة' : 'Overdue'}`}
+                                                                    label={typeof t.overdueInvoicesBadge === 'function' ? t.overdueInvoicesBadge(overdueCount) : `${overdueCount} Overdue`}
                                                                     color="error"
                                                                     size="small"
                                                                     variant="filled"
@@ -509,7 +498,7 @@ const ClientsPage = () => {
                                                                 />
                                                             ) : (
                                                                 <Chip 
-                                                                    label={t.noOverdueInvoices || (lang === 'ar' ? 'منتظم' : 'No Overdue')}
+                                                                    label={t.noOverdueInvoices}
                                                                     color="success"
                                                                     size="small"
                                                                     variant="outlined"
@@ -518,7 +507,6 @@ const ClientsPage = () => {
                                                             )}
                                                         </TableCell>
 
-                                                        {/* 🎯 تثبيت عرض عملة العميل الأصلية المسجلة بالدفترة بدون التأثر بالعملة الموحدة */}
                                                         <TableCell align={isRtl ? 'right' : 'left'} sx={{ py: 2 }}>
                                                             <Chip 
                                                                 label={getCurrencyFullName(cli.currency || 'EGP', lang)} 
@@ -533,7 +521,7 @@ const ClientsPage = () => {
                                                         </TableCell>
 
                                                         <TableCell align="center" sx={{ px: 2 }}>
-                                                            <Tooltip title={t.viewClientStatement || (lang === 'ar' ? 'عرض كشف الحساب' : 'View Statement')}>
+                                                            <Tooltip title={t.viewClientStatement}>
                                                                 <Button
                                                                     size="small"
                                                                     variant="outlined"
@@ -542,7 +530,7 @@ const ClientsPage = () => {
                                                                     onClick={(e) => handleOpenStatement(cli, e)}
                                                                     sx={{ fontSize: '11px', fontWeight: 600, textTransform: 'none', py: 0.3 }}
                                                                 >
-                                                                    {t.viewClientStatement || (lang === 'ar' ? 'كشف الحساب' : 'Statement')}
+                                                                    {t.viewClientStatement}
                                                                 </Button>
                                                             </Tooltip>
                                                         </TableCell>
@@ -567,7 +555,7 @@ const ClientsPage = () => {
                             >
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-                                        {t.rowsPerPage || (lang === 'ar' ? 'عدد الصفوف لكل صفحة:' : 'Rows per page:')}
+                                        {t.rowsPerPage}
                                     </Typography>
                                     <Select
                                         value={rowsPerPage}
@@ -586,7 +574,7 @@ const ClientsPage = () => {
 
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-                                        <bdi>{totalRows > 0 ? `${((page - 1) * rowsPerPage) + 1}-${Math.min(page * rowsPerPage, totalRows)} ${t.of || (lang === 'ar' ? 'من' : 'of')} ${totalRows}` : '0-0 of 0'}</bdi>
+                                        <bdi>{totalRows > 0 ? `${((page - 1) * rowsPerPage) + 1}-${Math.min(page * rowsPerPage, totalRows)} ${t.of} ${totalRows}` : '0-0 of 0'}</bdi>
                                     </Typography>
 
                                     <Pagination
@@ -598,6 +586,7 @@ const ClientsPage = () => {
                                         shape="rounded"
                                         showFirstButton
                                         showLastButton
+                                        dir={isRtl ? 'rtl' : 'ltr'}
                                     />
                                 </Box>
                             </Box>
@@ -618,7 +607,7 @@ const ClientsPage = () => {
             >
                 <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1, borderBottom: `1px solid ${theme.palette.divider}` }}>
                     <Typography variant="h6" fontWeight={700}>
-                        {t.clientStatementTitle || (lang === 'ar' ? 'كشف حساب العميل اللحظي' : 'Live Client Statement')}: {statementModal.clientName}
+                        {t.clientStatementTitle}: {statementModal.clientName}
                     </Typography>
                     <IconButton onClick={() => setStatementModal({ open: false, clientName: '', statementUrl: '' })}>
                         <CloseIcon />

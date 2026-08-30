@@ -78,7 +78,7 @@ const SettingsPage = () => {
 
         } catch (err) {
             console.error('Failed fetching currency settings:', err);
-            setSnackbar({ open: true, message: 'Failed loading settings', severity: 'error' });
+            setSnackbar({ open: true, message: t.failedLoadingSettings || 'Failed loading settings', severity: 'error' });
         } finally {
             setLoading(false);
         }
@@ -107,7 +107,6 @@ const SettingsPage = () => {
                 const isMainConversion = activeAccountCurrencies.includes(targetCurr);
                 const isSelectedAdditional = selectedTargetCurrencies.includes(targetCurr);
 
-                // 🎯 حفظ أسعار تحويل عملات الحسابات المربوطة دائماً + أسعار العملات الخارجية الإضافية
                 if ((isMainConversion || (isUnifiedEnabled && isSelectedAdditional)) && targetCurr && sourceCurr && !isNaN(numVal) && numVal > 0) {
                     ratesArray.push({
                         from_currency: targetCurr,
@@ -119,18 +118,18 @@ const SettingsPage = () => {
 
             const payload = {
                 userId,
-                is_unified_enabled: isUnifiedEnabled, // 👈 يحدد فقط تفعيل القائمة المنسدلة للتوحيد كـ Feature باللوحات
+                is_unified_enabled: isUnifiedEnabled,
                 active_currency: isUnifiedEnabled ? (selectedTargetCurrencies[0] || activeAccountCurrencies[0] || 'DEFAULT') : 'DEFAULT',
                 rates: ratesArray
             };
 
             await API.post('/currency/settings', payload);
-            setSnackbar({ open: true, message: 'Currency settings saved successfully', severity: 'success' });
+            setSnackbar({ open: true, message: t.currencySettingsSavedSuccess || 'Currency settings saved successfully', severity: 'success' });
             
             fetchData();
         } catch (err) {
             console.error('Failed saving currency settings:', err);
-            setSnackbar({ open: true, message: 'Failed saving settings', severity: 'error' });
+            setSnackbar({ open: true, message: t.failedSavingSettings || 'Failed saving settings', severity: 'error' });
         } finally {
             setSaving(false);
         }
@@ -149,11 +148,10 @@ const SettingsPage = () => {
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
                                 <CurrencyIcon color="primary" sx={{ fontSize: 24 }} />
                                 <Typography variant="h6" fontWeight={700} fontSize="17px">
-                                    {t.settingsTitle || 'Unified Currency Settings'}
+                                    {t.unifiedCurrencyReporting || 'Unified Currency Settings'}
                                 </Typography>
                             </Box>
                             
-                            {/* 🎯 المفتاح مسئول فقط عن إظهار/إخفاء خيار "التوحيد الإجباري" كـ Feature باللوحة */}
                             <FormControlLabel
                                 control={
                                     <Switch
@@ -165,7 +163,7 @@ const SettingsPage = () => {
                                 }
                                 label={
                                     <Typography fontWeight={600} variant="body2" fontSize="13px">
-                                        {t.enableUnifiedCurrency || 'Enable Unified Currency Reporting'}
+                                        {t.enableUnifiedReporting || 'Enable Unified Currency Reporting'}
                                     </Typography>
                                 }
                                 sx={{ mr: 0 }}
@@ -180,7 +178,6 @@ const SettingsPage = () => {
                             </Box>
                         ) : (
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-                                {/* 🟢 SECTION 1: التحويل المباشر بين عملات الحسابات المربوطة (يعمل ويحفظ دائماً بشكل مستقل عن الـ Switch) */}
                                 {activeAccountCurrencies.length > 1 && (
                                     <Paper
                                         elevation={0}
@@ -194,7 +191,7 @@ const SettingsPage = () => {
                                     >
                                         <Typography variant="subtitle2" fontWeight={700} color="primary.main" fontSize="13px" sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 0.8 }}>
                                             <MainAccountIcon fontSize="small" />
-                                            Primary Connected Accounts Conversion:
+                                            {t.primaryConnectedAccountsConversion || 'Primary Connected Accounts Conversion Rates:'}
                                         </Typography>
 
                                         <Grid container spacing={2}>
@@ -205,9 +202,10 @@ const SettingsPage = () => {
 
                                                 return (
                                                     <Grid item xs={12} sm={8} key={key}>
-                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                                            <Typography variant="body2" fontWeight={600} fontSize="13px" sx={{ minWidth: 70 }}>
-                                                                1 {subCurr} =
+                                                        {/* 🎯 إضافة dir="ltr" لضبط المعادلة وتنسيق Flex */}
+                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: isRtl ? 'flex-end' : 'flex-start' }} dir="ltr">
+                                                            <Typography variant="body2" fontWeight={600} fontSize="13px" sx={{ minWidth: 60, textAlign: 'right' }}>
+                                                                {t.oneUnitEquals ? t.oneUnitEquals(subCurr) : `1 ${subCurr} =`}
                                                             </Typography>
                                                             <TextField
                                                                 size="small"
@@ -229,12 +227,11 @@ const SettingsPage = () => {
                                     </Paper>
                                 )}
 
-                                {/* 🔵 SECTION 2: إضافة عملات عرض إضافية خارجية (تظهر عند تشغيل خيار التقرير الموحد) */}
                                 {isUnifiedEnabled && (
                                     <>
                                         <Box>
                                             <Typography variant="subtitle2" fontWeight={700} fontSize="13px" sx={{ mb: 1 }}>
-                                                Select Additional Display Currencies (Not in your accounts):
+                                                {t.selectAdditionalDisplayCurrencies || 'Select Additional Display Currencies (Not in your accounts):'}
                                             </Typography>
                                             <Autocomplete
                                                 multiple
@@ -259,7 +256,7 @@ const SettingsPage = () => {
                                                     <TextField
                                                         {...params}
                                                         variant="outlined"
-                                                        placeholder={selectedTargetCurrencies.length === 0 ? "Add External Currency (e.g. USD, EUR)" : ""}
+                                                        placeholder={selectedTargetCurrencies.length === 0 ? (t.addExternalCurrencyPlaceholder || "Add External Currency (e.g. USD, EUR)") : ""}
                                                         size="small"
                                                         sx={{ '& input': { fontSize: '13px' } }}
                                                     />
@@ -272,7 +269,7 @@ const SettingsPage = () => {
                                             <Box sx={{ mt: 0.5 }}>
                                                 <Typography variant="subtitle2" fontWeight={700} fontSize="13px" sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 0.8 }}>
                                                     <ExchangeIcon fontSize="small" color="primary" />
-                                                    External Currencies Rates Matrix:
+                                                    {t.externalCurrenciesRatesMatrix || 'External Currencies Rates Matrix:'}
                                                 </Typography>
 
                                                 {selectedTargetCurrencies.map((targetCurr) => (
@@ -289,7 +286,7 @@ const SettingsPage = () => {
                                                         }}
                                                     >
                                                         <Typography variant="subtitle2" fontWeight={700} color="primary.main" fontSize="12px" sx={{ mb: 1 }}>
-                                                            Rates for {getCurrencyFullName(targetCurr, lang)} ({targetCurr}):
+                                                            {t.ratesForCurrency ? t.ratesForCurrency(targetCurr) : `Rates for ${targetCurr}:`}
                                                         </Typography>
 
                                                         <Grid container spacing={1.5}>
@@ -299,9 +296,10 @@ const SettingsPage = () => {
 
                                                                 return (
                                                                     <Grid item xs={12} sm={6} key={sourceCurr}>
-                                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                                                            <Typography variant="body2" fontWeight={600} fontSize="12px" sx={{ minWidth: 80 }}>
-                                                                                1 {targetCurr} =
+                                                                        {/* 🎯 إضافة dir="ltr" هنا أيضاً للمصفوفة الإضافية */}
+                                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: isRtl ? 'flex-end' : 'flex-start' }} dir="ltr">
+                                                                            <Typography variant="body2" fontWeight={600} fontSize="12px" sx={{ minWidth: 60, textAlign: 'right' }}>
+                                                                                {t.oneUnitEquals ? t.oneUnitEquals(targetCurr) : `1 ${targetCurr} =`}
                                                                             </Typography>
                                                                             <TextField
                                                                                 size="small"
@@ -339,7 +337,7 @@ const SettingsPage = () => {
                                         onClick={handleSave}
                                         sx={{ px: 3, py: 0.8, borderRadius: 2, textTransform: 'none', fontWeight: 700, fontSize: '13px' }}
                                     >
-                                        {saving ? <CircularProgress size={20} color="inherit" /> : 'Save Currency Settings'}
+                                        {saving ? <CircularProgress size={20} color="inherit" /> : (t.saveSettingsBtn || 'Save Settings')}
                                     </Button>
                                 </Box>
                             </Box>
@@ -362,4 +360,4 @@ const SettingsPage = () => {
     );
 };
 
-export default SettingsPage;
+export default SettingsPage;    

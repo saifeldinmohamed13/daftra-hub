@@ -5,7 +5,7 @@ const pool = require('../config/db');
  */
 const getSystemCurrencies = async (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.user.userId; // 🎯 تأمين
 
         const query = `
             SELECT DISTINCT UPPER(currency_code) AS currency_code 
@@ -32,7 +32,7 @@ const getSystemCurrencies = async (req, res) => {
  */
 const getCurrencySettings = async (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.user.userId; // 🎯 تأمين
 
         const prefQuery = `
             SELECT is_unified_enabled, active_currency 
@@ -67,7 +67,8 @@ const getCurrencySettings = async (req, res) => {
 const saveCurrencySettings = async (req, res) => {
     const client = await pool.connect();
     try {
-        const { userId, is_unified_enabled, active_currency, rates } = req.body;
+        const { is_unified_enabled, active_currency, rates } = req.body;
+        const userId = req.user.userId; // 🎯 تأمين
 
         await client.query('BEGIN');
 
@@ -118,13 +119,9 @@ const saveCurrencySettings = async (req, res) => {
  */
 const setActiveCurrencyPreference = async (req, res) => {
     try {
-        const userId = req.params.userId || req.body.userId;
+        const userId = req.user.userId; // 🎯 تأمين
         const activeCurrInput = req.body.active_currency || req.body.activeCurrency;
         const targetCurr = (activeCurrInput || 'DEFAULT').toUpperCase().trim();
-
-        if (!userId) {
-            return res.status(400).json({ error: "User ID is required" });
-        }
 
         // 🎯 الحفاظ على قيمة is_unified_enabled الموجودة دون إعادة كتابتها بـ false
         const prefQuery = `

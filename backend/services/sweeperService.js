@@ -11,7 +11,8 @@ const {
     syncChartOfAccounts,
     syncProducts,
     syncProductDailySales,
-    cleanOldCacheData
+    cleanOldCacheData,
+    syncPendingRequisitionsForAccount // 🎯 تم استدعاء الدالة المختصة
 } = require('./syncService');
 
 /**
@@ -64,7 +65,7 @@ const initDistributedSweeperCron = () => {
                 } 
                 else if (currentMinute >= 10 && currentMinute < 20) {
                     console.log(` 🚚 [Module 2: COGS & Requisitions] Refreshing Delivery Status for Account #${accountId}`);
-                    await syncInvoicesV2(accountId, cleanSubdomain, config, branchIds, isSingleDay, null);
+                    await syncPendingRequisitionsForAccount(accountId); // 🎯 استدعاء الدالة المختصة
                 } 
                 else if (currentMinute >= 20 && currentMinute < 30) {
                     console.log(` 👥 [Module 3: Clients] Syncing Clients for Account #${accountId}`);

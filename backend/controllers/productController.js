@@ -8,15 +8,15 @@ const { getUserCurrencyContext, convertToActiveCurrency } = require('../utils/cu
 const getTopSoldProducts = async (req, res) => {
     try {
         const { accountId } = req.params;
+        const userId = req.user.userId; // 🎯 تأمين
         const { targetCurrency } = req.query;
 
         // جلب سياق العملة للحساب التابع للمستخدم
-        const accUserRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1', [accountId]);
+        const accUserRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]); // 🎯 تأمين
         if (accUserRes.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'Linked account not found' });
+            return res.status(404).json({ success: false, error: 'Linked account not found or unauthorized' });
         }
 
-        const userId = accUserRes.rows[0].user_id;
         const accountBaseCurrency = (accUserRes.rows[0].currency_code || 'EGP').toUpperCase().trim();
 
         const currencyContext = await getUserCurrencyContext(userId);
@@ -73,18 +73,18 @@ const getTopSoldProducts = async (req, res) => {
 const getAccountProductsList = async (req, res) => {
     try {
         const { accountId } = req.params;
+        const userId = req.user.userId; // 🎯 تأمين
         const { targetCurrency } = req.query;
         const limit = req.query.limit ? parseInt(req.query.limit, 10) : null;
         const page = req.query.page ? parseInt(req.query.page, 10) : 1;
         const offset = limit ? (page - 1) * limit : 0;
 
         // جلب سياق العملة للحساب
-        const accUserRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1', [accountId]);
+        const accUserRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]); // 🎯 تأمين
         if (accUserRes.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'Linked account not found' });
+            return res.status(404).json({ success: false, error: 'Linked account not found or unauthorized' });
         }
 
-        const userId = accUserRes.rows[0].user_id;
         const accountBaseCurrency = (accUserRes.rows[0].currency_code || 'EGP').toUpperCase().trim();
 
         const currencyContext = await getUserCurrencyContext(userId);

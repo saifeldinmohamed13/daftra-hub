@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const currencyController = require('../controllers/currencyController');
+const { protect } = require('../middleware/authMiddleware'); // 🎯 إضافة ميدل وير الحماية
+
+// 🔒 تأمين جميع مسارات إعدادات العملة باستخدام التوكن
+router.use(protect);
 
 // 🎯 جلب العملات المستخرجة من أكونتات الدفترة المربوطة
 router.get('/system-currencies/:userId', currencyController.getSystemCurrencies);
