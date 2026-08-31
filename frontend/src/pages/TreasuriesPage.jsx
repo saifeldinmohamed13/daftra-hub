@@ -176,7 +176,7 @@ const TreasuriesPage = () => {
                                                         {item.treasury_name}
                                                     </Typography>
                                                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-                                                        #{item.journal_account_id} • {item.branch_name || item.account_name}
+                                                        {item.account_name} • {item.branch_name} 
                                                     </Typography>
                                                 </Box>
                                             </Box>

@@ -175,7 +175,7 @@ const syncPendingRequisitionsForAccount = async (accountId) => {
                         await pool.query(`
                             UPDATE invoices_cache 
                             SET requisition_delivery_status = $1,
-                                total_cogs = COALESCE(total_cogs, 0) + $2
+                                total_cogs = COALESCE(NULLIF(total_cogs, 0), $2)
                             WHERE account_id = $3 AND daftra_invoice_id = $4;
                         `, [mappedInvoiceStatus, newCogs, accountId, daftraInvoiceId]);
                     } else {
@@ -634,7 +634,8 @@ const syncInvoicesV2 = async (accountId, cleanSubdomain, config, branchIds, isSi
     try {
         if (jobId) await updateJobProgress(jobId, { current_step: 'fetching_invoices' });
 
-        const siteQuery = await pool.query('SELECT daftra_site_id, currency_code FROM linked_accounts WHERE id = $1;', [accountId]);
+        const siteQuery = await pool.query('SELECT user_id, daftra_site_id, currency_code FROM linked_accounts WHERE id = $1;', [accountId]);
+        const userId              = siteQuery.rows[0]?.user_id;
         const daftraSiteId        = siteQuery.rows[0]?.daftra_site_id  || 'UNKNOWN';
         const accountBaseCurrency = (siteQuery.rows[0]?.currency_code || 'EGP').toUpperCase();
 
@@ -718,6 +719,15 @@ const syncInvoicesV2 = async (accountId, cleanSubdomain, config, branchIds, isSi
             let exchangeRate = 1.0;
             if (currencyCode.toUpperCase() !== accountBaseCurrency) {
                 exchangeRate = foreignJournalMap[daftraReturnId] || 1.0;
+                if (exchangeRate === 1.0 && userId) {
+                    const rateRes = await pool.query(
+                        `SELECT exchange_value FROM user_exchange_rates WHERE user_id = $1 AND from_currency = $2 AND to_currency = $3 LIMIT 1;`,
+                        [userId, currencyCode.toUpperCase(), accountBaseCurrency]
+                    );
+                    if (rateRes.rows.length > 0) {
+                        exchangeRate = parseFloat(rateRes.rows[0].exchange_value);
+                    }
+                }
             }
 
             const baseTotalAmount = parseFloat((totalAmount * exchangeRate).toFixed(4));
@@ -927,6 +937,15 @@ const syncInvoicesV2 = async (accountId, cleanSubdomain, config, branchIds, isSi
             let exchangeRate = 1.0;
             if (currencyCode.toUpperCase() !== accountBaseCurrency) {
                 exchangeRate = foreignJournalMap[daftraInvoiceId] || 1.0;
+                if (exchangeRate === 1.0 && userId) {
+                    const rateRes = await pool.query(
+                        `SELECT exchange_value FROM user_exchange_rates WHERE user_id = $1 AND from_currency = $2 AND to_currency = $3 LIMIT 1;`,
+                        [userId, currencyCode.toUpperCase(), accountBaseCurrency]
+                    );
+                    if (rateRes.rows.length > 0) {
+                        exchangeRate = parseFloat(rateRes.rows[0].exchange_value);
+                    }
+                }
             }
 
             const baseNetRevenue    = parseFloat((netRevenue   * exchangeRate).toFixed(4));
@@ -987,7 +1006,7 @@ const syncInvoicesV2 = async (accountId, cleanSubdomain, config, branchIds, isSi
                     base_total_amount             = EXCLUDED.base_total_amount,
                     base_summary_paid             = EXCLUDED.base_summary_paid,
                     base_summary_unpaid           = EXCLUDED.base_summary_unpaid,
-                    total_cogs                    = EXCLUDED.total_cogs,
+                    total_cogs                    = CASE WHEN EXCLUDED.total_cogs > 0 THEN EXCLUDED.total_cogs ELSE invoices_cache.total_cogs END,
                     is_return                     = EXCLUDED.is_return,
                     draft                         = EXCLUDED.draft;
             `, [
@@ -1039,7 +1058,6 @@ const syncInvoicePayments = async (accountId, cleanSubdomain, config, branchIds 
             const branchId        = p.branch_id ? parseInt(p.branch_id, 10) : null;
             const notes           = p.notes || p.receipt_notes || null;
 
-            // 🎯 1. تحديد نوع المدفوعة
             let paymentType = 'invoice_payment';
             if (rawInvoiceId !== null) {
                 paymentType = rawAmount < 0 ? 'invoice_return' : 'invoice_payment';
@@ -1047,7 +1065,6 @@ const syncInvoicePayments = async (accountId, cleanSubdomain, config, branchIds 
                 paymentType = rawAmount >= 0 ? 'client_credit_plus' : 'client_debit_minus';
             }
 
-            // 🎯 2. جلب رقم الفاتورة
             let invoiceNo = null;
             if (rawInvoiceId !== null) {
                 const localInvRes = await pool.query(
@@ -1061,7 +1078,6 @@ const syncInvoicePayments = async (accountId, cleanSubdomain, config, branchIds 
                 }
             }
 
-            // 🎯 3. حساب سعر الصرف والمبلغ الأساسي بناءً على الفاتورة أو المدفوعة
             let exchangeRate = 1.0;
             if (currencyCode !== accountBaseCurrency) {
                 if (rawInvoiceId !== null) {
@@ -1080,7 +1096,6 @@ const syncInvoicePayments = async (accountId, cleanSubdomain, config, branchIds 
             }
             const baseAmount = parseFloat((rawAmount * exchangeRate).toFixed(4));
 
-            // 🎯 4. الحفظ أو التحديث
             await pool.query(`
                 INSERT INTO invoice_payments_cache
                 (account_id, daftra_payment_id, invoice_id, invoice_no, client_id,
@@ -1109,7 +1124,6 @@ const syncInvoicePayments = async (accountId, cleanSubdomain, config, branchIds 
             ]);
         }
 
-        // 🎯 5. تنظيف أي مدفوعة اتحذفت من دفترة خلال الـ 30 يوماً
         if (!isSingleDay && fetchedPaymentIds.length > 0) {
             await pool.query(`
                 DELETE FROM invoice_payments_cache

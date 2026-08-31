@@ -298,7 +298,7 @@ const BranchDashboard = () => {
         if (syncJobId) {
             pollingInterval = setInterval(async () => {
                 try {
-                    const res = await API.get(`/auth/sync-status/${syncJobId}`);
+                    const res = await API.get(`/auth/sync-status/${syncJobId}`, { showLoader: false });
                     const job = res.data;
                     setJobStatus(job);
 
@@ -335,7 +335,7 @@ const BranchDashboard = () => {
         setLocalSyncLoading(true);
         setJobStatus(null);
         try {
-            const response = await API.post(`/financial/sync-branch/${accountId}`);
+            const response = await API.post(`/financial/sync-branch/${accountId}`, {}, { showLoader: false });
             if (response.data?.backgroundJobLaunched) {
                 setSyncJobId(response.data.jobId);
             }

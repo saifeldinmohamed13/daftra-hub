@@ -28,19 +28,28 @@ const buildBulkInQuery = (paramName, idsArray) => {
 };
 
 /**
+ * 🏢 🎯 NEW HELPER: Fetch and resolve all branch IDs for a clean initial bootstrap
+ */
+const fetchAndResolveAllAccountBranches = async (cleanSubdomain, config) => {
+    try {
+        const allBranches = await fetchBranchesFromDaftra(cleanSubdomain, config);
+        const branchIds = allBranches.map(b => parseInt(b.id || b.branch_id, 10)).filter(Boolean);
+        return branchIds;
+    } catch (err) {
+        console.error(`⚠️ Failed fetching all account branches for ${cleanSubdomain}:`, err.message);
+        return [];
+    }
+};
+
+/**
  * 🏢 Helper to resolve branch IDs safely (ضمان شمول جميع الفروع دائماً)
  */
 const resolveBranchFilter = async (cleanSubdomain, config, branchIds = []) => {
     let finalBranchIds = Array.isArray(branchIds) ? branchIds.filter(Boolean) : [];
     
-    // لو لم يتم إرسال فروع، نسحب كافة فروع الحساب من دفترة تلقائياً لتجنب سقوط البيانات
+    // 🎯 لو لم يتم إرسال فروع محددة، نسحب كافة فروع الحساب من دفترة تلقائياً لتجنب سقوط البيانات
     if (finalBranchIds.length === 0) {
-        try {
-            const allBranches = await fetchBranchesFromDaftra(cleanSubdomain, config);
-            finalBranchIds = allBranches.map(b => b.id || b.branch_id).filter(Boolean);
-        } catch (err) {
-            console.error(`⚠️ Failed auto-resolving all branches for ${cleanSubdomain}:`, err.message);
-        }
+        finalBranchIds = await fetchAndResolveAllAccountBranches(cleanSubdomain, config);
     }
     
     return buildBulkInQuery('branch_id', finalBranchIds);
@@ -525,6 +534,7 @@ module.exports = {
     fetchAllPagesV2,
     checkDaftraAppActive,
     fetchExactEntityTotals,
+    fetchAndResolveAllAccountBranches,
     fetchBranchesFromDaftra,
     fetchTreasuriesFromDaftra,
     fetchTreasuryJournalAccounts,

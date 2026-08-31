@@ -18,13 +18,16 @@ const CurrencyDisplay = ({
 }) => {
     const rate = parseFloat(exchangeRate || 1);
     
-    // 🎯 تحديد العملة المستهدفة للعرض
-    const activeCurr = (isUnified ? displayCurrency : (baseCurrencyCode || 'EGP')).toUpperCase().trim();
+    // 🎯 تحديد العملات
+    const activeCurr = (isUnified && displayCurrency && displayCurrency !== 'DEFAULT' 
+        ? displayCurrency 
+        : (baseCurrencyCode || 'EGP')).toUpperCase().trim();
+        
     const invCurr = (currencyCode || 'EGP').toUpperCase().trim();
 
     const origVal = parseFloat(amount || 0);
     
-    // 🎯 حساب القيمة المترجمة
+    // 🎯 حساب القيمة الأساسية/المترجمة
     const baseVal = (baseAmount !== undefined && baseAmount !== null && !isNaN(parseFloat(baseAmount)))
         ? parseFloat(baseAmount)
         : (origVal * rate);
@@ -38,8 +41,11 @@ const CurrencyDisplay = ({
     const fontSize = size === 'caption' ? '11px' : '13px';
     const subFontSize = size === 'caption' ? '9.5px' : '11px';
 
-    // 🎯 1. حالة التوحيد مفعّل (`isUnified = true`): نعرض القيمة الموحدة فقط في سطر واحد بدون السطر الفرعي
-    if (isUnified) {
+    // 🎯 1. حالة التوحيد الصريح مفعّل (isUnified = true ومختار عملة مش DEFAULT)
+    // نعرض القيمة الموحدة فقط في سطر واحد بدون السطر الفرعي
+    const isExplicitUnified = isUnified && displayCurrency && displayCurrency !== 'DEFAULT';
+
+    if (isExplicitUnified) {
         return (
             <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
                 <Typography variant={size} sx={{ fontSize, fontWeight: isBold ? 700 : 500, color }}>
@@ -58,8 +64,9 @@ const CurrencyDisplay = ({
         );
     }
 
-    // 🎯 2. حالة وضع الديفولت (`isUnified = false`) والعملة مش أجنبية: نعرض القيمة الأصلية للسيستم
-    const isForeign = invCurr !== activeCurr && Math.abs(baseVal - origVal) > 0.01;
+    // 🎯 2. حالة وضع الديفولت (سواء isUnified = false أو اختار DEFAULT)
+    // الفحص يعتمد على الاختلاف في كود العملة فقط (invCurr !== activeCurr)
+    const isForeign = invCurr !== activeCurr;
 
     if (!isForeign) {
         return (
@@ -80,7 +87,7 @@ const CurrencyDisplay = ({
         );
     }
 
-    // 🎯 3. حالة الديفولت مع وجود عملة أجنبية فقط: نعرض المبلغين فوق بعض مع Tooltip سعر الصرف
+    // 🎯 3. حالة الديفولت مع وجود عملة أجنبية مختلفة: نعرض المبلغين فوق بعض مع Tooltip سعر الصرف
     const calculatedRate = origVal > 0 ? (baseVal / origVal) : rate;
     const tooltipTitle = `1 ${origSymbol} = ${formatCurrency(calculatedRate)} ${activeSymbol} (${activeFullName})`;
 

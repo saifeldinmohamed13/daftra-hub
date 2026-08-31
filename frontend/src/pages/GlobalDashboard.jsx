@@ -331,7 +331,7 @@ const GlobalDashboard = () => {
         if (syncJobId) {
             pollingInterval = setInterval(async () => {
                 try {
-                    const res = await API.get(`/auth/sync-status/${syncJobId}`);
+                    const res = await API.get(`/auth/sync-status/${syncJobId}`, { showLoader: false });
                     const job = res.data;
                     setJobStatus(job);
 
@@ -364,7 +364,7 @@ const GlobalDashboard = () => {
         setSyncLoading(true);
         setJobStatus(null);
         try {
-            const response = await API.post(`/financial/sync-all/${userId}`);
+            const response = await API.post(`/financial/sync-all/${userId}`, {}, { showLoader: false });
             if (response.data?.backgroundJobLaunched) {
                 setSyncJobId(response.data.jobId);
             } else {

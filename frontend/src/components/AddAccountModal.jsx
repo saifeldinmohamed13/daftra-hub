@@ -67,7 +67,7 @@ const AddAccountModal = ({ open, onClose, userId, onAccountAdded }) => {
                 email,
                 password,
                 userId,
-            });
+            }, { showLoader: false });
 
             if (response.data?.backgroundJobLaunched) {
                 setSyncJobId(response.data.jobId);
@@ -93,7 +93,7 @@ const AddAccountModal = ({ open, onClose, userId, onAccountAdded }) => {
         if (syncJobId) {
             pollingInterval = setInterval(async () => {
                 try {
-                    const res = await API.get(`/auth/sync-status/${syncJobId}`);
+                    const res = await API.get(`/auth/sync-status/${syncJobId}`, { showLoader: false });
                     const job = res.data;
                     setJobStatus(job);
 
