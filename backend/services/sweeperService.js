@@ -4,6 +4,7 @@ const { checkDaftraAppActive } = require('./daftraService');
 const {
     syncBranches,
     syncInvoicesV2,
+    syncInvoicePayments, // 🎯 تم استيراد دالة مزامنة المدفوعات
     syncClients,
     syncTreasuries,
     syncTreasuryTransactions,
@@ -12,7 +13,7 @@ const {
     syncProducts,
     syncProductDailySales,
     cleanOldCacheData,
-    syncPendingRequisitionsForAccount // 🎯 تم استدعاء الدالة المختصة
+    syncPendingRequisitionsForAccount
 } = require('./syncService');
 
 /**
@@ -64,8 +65,10 @@ const initDistributedSweeperCron = () => {
                     await cleanOldCacheData(accountId);
                 } 
                 else if (currentMinute >= 10 && currentMinute < 20) {
-                    console.log(` 🚚 [Module 2: COGS & Requisitions] Refreshing Delivery Status for Account #${accountId}`);
-                    await syncPendingRequisitionsForAccount(accountId); // 🎯 استدعاء الدالة المختصة
+                    // 🎯 تم إدراج مزامنة المدفوعات هنا كأهدى وأفضل فترة زمنية
+                    console.log(` 🚚 [Module 2: COGS, Payments & Requisitions] Refreshing Payments & Delivery Status for Account #${accountId}`);
+                    await syncInvoicePayments(accountId, cleanSubdomain, config, branchIds, isSingleDay, null);
+                    await syncPendingRequisitionsForAccount(accountId);
                 } 
                 else if (currentMinute >= 20 && currentMinute < 30) {
                     console.log(` 👥 [Module 3: Clients] Syncing Clients for Account #${accountId}`);
