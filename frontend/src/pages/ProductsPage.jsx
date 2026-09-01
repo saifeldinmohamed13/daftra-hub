@@ -30,7 +30,6 @@ const ProductsPage = () => {
     const totalPages = Math.ceil(totalRows / rowsPerPage) || 1;
     const defaultsInitialised = useRef(false);
 
-    // قراءة إعدادات العملة الموحدة
     const fetchCurrencySettings = useCallback(async () => {
         try {
             const res = await API.get(`/currency/settings/${userId}`);
@@ -141,6 +140,8 @@ const ProductsPage = () => {
                                             products.map((p) => {
                                                 const availableStockVal = parseFloat(p.available_stock || 0);
                                                 const pendingStockVal   = parseFloat(p.pending_stock   || 0);
+                                                const totalSoldQtyVal   = parseFloat(p.total_sold_qty  || 0);
+                                                const totalStockVal     = parseFloat(p.total_stock     || 0);
                                                 const displayAvailable  = Math.max(0, availableStockVal);
 
                                                 return (
@@ -156,13 +157,12 @@ const ProductsPage = () => {
                                                         </TableCell>
                                                         <TableCell align="center" sx={{ py: 1.8 }}>
                                                             <Chip
-                                                                label={`${p.total_sold_qty} ${t.unitsCount || 'pcs'}`}
+                                                                label={`${totalSoldQtyVal} ${t.unitsCount || 'قطعة'}`}
                                                                 color="primary" size="small" variant="outlined"
                                                                 sx={{ fontWeight: 700, fontSize: '11px' }}
                                                             />
                                                         </TableCell>
                                                         
-                                                        {/* 🎯 إجمالي المبيعات باستخدام CurrencyDisplay الموحد */}
                                                         <TableCell sx={{ py: 1.8, fontWeight: 700, color: 'success.main' }}>
                                                             <CurrencyDisplay
                                                                 amount={p.total_revenue}
@@ -197,7 +197,7 @@ const ProductsPage = () => {
                                                             </Typography>
                                                         </TableCell>
                                                         <TableCell align="center" sx={{ py: 1.8, px: 2, fontWeight: 700 }}>
-                                                            {p.total_stock}
+                                                            {totalStockVal}
                                                         </TableCell>
                                                     </TableRow>
                                                 );
@@ -207,41 +207,50 @@ const ProductsPage = () => {
                                 </Table>
                             </TableContainer>
 
+                            {/* 🎯 الـ Footer المعدل: خيار "سجل في الصفحة" على اليمين والأسهم والأرقام على اليسار */}
                             <Box sx={{
-                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                p: 2, flexWrap: 'wrap', gap: 2,
-                                borderTop: '1px solid rgba(224, 224, 224, 0.5)',
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'space-between',
+                                p: 2, 
+                                borderTop: '1px solid rgba(224, 224, 224, 0.5)'
                             }}>
+                                {/* الجزء الأيمن: خيار سجل في الصفحة */}
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-                                        {t.rowsPerPage || 'Rows per page:'}
+                                        {t.rowsPerPage || 'سجل في الصفحة:'}
                                     </Typography>
                                     <Select
                                         value={rowsPerPage}
                                         onChange={handleChangeRowsPerPage}
-                                        size="small" variant="outlined"
-                                        sx={{ height: 30, fontSize: '0.75rem', borderRadius: '4px', '.MuiOutlinedInput-input': { py: 0.5 } }}
+                                        size="small" 
+                                        variant="outlined"
+                                        sx={{ height: 32, fontSize: '0.8rem', borderRadius: '6px', '.MuiOutlinedInput-input': { py: 0.5, px: 1.5 } }}
                                     >
                                         {[5, 10, 20, 50].map((option) => (
-                                            <MenuItem key={option} value={option} sx={{ fontSize: '0.75rem' }}>
+                                            <MenuItem key={option} value={option} sx={{ fontSize: '0.8rem' }}>
                                                 {option}
                                             </MenuItem>
                                         ))}
                                     </Select>
                                 </Box>
 
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, ml: 'auto' }}>
+                                {/* الجزء الأيسر: أرقام الصفحات والتنقل والعدد الإجمالي */}
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
                                         {totalRows > 0
-                                            ? `${((page - 1) * rowsPerPage) + 1}–${Math.min(page * rowsPerPage, totalRows)} ${t.of || 'of'} ${totalRows}`
+                                            ? `${((page - 1) * rowsPerPage) + 1}–${Math.min(page * rowsPerPage, totalRows)} ${t.of || 'من'} ${totalRows}`
                                             : '0'}
                                     </Typography>
                                     <Pagination
-                                        count={totalPages} page={page}
+                                        count={totalPages} 
+                                        page={page}
                                         onChange={handlePageNumberChange}
-                                        color="primary" size="small" shape="rounded"
-                                        showFirstButton showLastButton
-                                        sx={{ '& .MuiPagination-ul': { flexDirection: isRtl ? 'row-reverse' : 'row' } }}
+                                        color="primary" 
+                                        size="small" 
+                                        shape="rounded"
+                                        showFirstButton 
+                                        showLastButton
                                     />
                                 </Box>
                             </Box>
