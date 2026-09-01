@@ -74,6 +74,134 @@ const formatDate = (dateStr) => {
     return isNaN(date.getTime()) ? '—' : date.toLocaleDateString();
 };
 
+// 🎯 دالة ديناميكية لتنظيف وإظهار أي اسم طريقة دفع قادم من الـ API
+const formatDynamicMethodName = (rawName, lang = 'ar') => {
+    if (!rawName) return '';
+    
+    const knownTranslations = {
+        cash: { ar: 'نقداً', en: 'Cash' },
+        bank_transfer: { ar: 'تحويل بنكي', en: 'Bank Transfer' },
+        bank: { ar: 'تحويل بنكي', en: 'Bank Transfer' },
+        client_credit: { ar: 'رصيد عميل', en: 'Client Credit' },
+        check: { ar: 'شيك', en: 'Check' },
+        visa: { ar: 'بطاقة إئتمان', en: 'Visa / Card' },
+        network: { ar: 'شبكة / مدى', en: 'POS Network' },
+        credit: { ar: 'آجل / غير مسدد', en: 'Credit / Unpaid' }
+    };
+
+    const cleanKey = rawName.toString().toLowerCase().trim();
+    if (knownTranslations[cleanKey]) {
+        return knownTranslations[cleanKey][lang] || knownTranslations[cleanKey].en;
+    }
+
+    const formatted = rawName
+        .toString()
+        .replace(/[_-]/g, ' ')
+        .trim();
+
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+};
+
+// 🎯 Tooltip المخصص لطرق الدفع بالفرع مع فلترة العملات ذات القيمة 0
+const CustomSalesDonutTooltip = ({ active, payload, lang, activeTargetCurrency, fallbackCurrCode }) => {
+    const theme = useTheme();
+    if (active && payload && payload.length) {
+        const data = payload[0].payload;
+        const displayName = formatDynamicMethodName(data.rawKey || data.name, lang);
+        const isUnifiedSelected = activeTargetCurrency && activeTargetCurrency !== 'DEFAULT';
+
+        const validBreakdown = (data.currenciesBreakdown || []).filter(item => parseFloat(item.amount || 0) > 0);
+
+        return (
+            <Paper
+                elevation={4}
+                sx={{
+                    p: 1.5,
+                    bgcolor: theme.palette.mode === 'dark' ? '#1e293b' : '#ffffff',
+                    border: `1px solid ${theme.palette.divider}`,
+                    borderRadius: 2,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.15)'
+                }}
+            >
+                <Typography variant="subtitle2" fontWeight={700} color="primary.main" mb={0.5}>
+                    {displayName}
+                </Typography>
+
+                {isUnifiedSelected ? (
+                    <Typography variant="caption" fontWeight={700} color="text.secondary">
+                        <bdi>{formatCurrency(data.value)}</bdi> {getCurrencySymbol(activeTargetCurrency, lang)}
+                    </Typography>
+                ) : validBreakdown.length > 0 ? (
+                    validBreakdown.map((item, idx) => (
+                        <Typography key={idx} variant="caption" display="block" color="text.secondary" fontWeight={600}>
+                            <bdi>{formatCurrency(item.amount)}</bdi> {getCurrencySymbol(item.currency, lang)}
+                        </Typography>
+                    ))
+                ) : (
+                    <Typography variant="caption" fontWeight={600} color="text.secondary">
+                        <bdi>{formatCurrency(data.value)}</bdi> {getCurrencySymbol(fallbackCurrCode, lang)}
+                    </Typography>
+                )}
+            </Paper>
+        );
+    }
+    return null;
+};
+
+// 🎯 Tooltip المخصص لحالة تحصيل فواتير الفرع
+const CustomCollectionDonutTooltip = ({ active, payload, lang, activeTargetCurrency, fallbackCurrCode, t }) => {
+    const theme = useTheme();
+    if (active && payload && payload.length) {
+        const data = payload[0].payload;
+        
+        const statusNames = {
+            paid: t?.statusPaid || (lang === 'ar' ? 'المحصل' : 'Paid'),
+            unpaid: t?.statusUnpaid || (lang === 'ar' ? 'المتبقي / المستحق' : 'Unpaid / Due'),
+            returned: t?.statusReturned || (lang === 'ar' ? 'المرتجعات' : 'Returned')
+        };
+
+        const rawNameKey = data.rawKey || data.name;
+        const displayName = statusNames[rawNameKey] || data.name;
+        const isUnifiedSelected = activeTargetCurrency && activeTargetCurrency !== 'DEFAULT';
+
+        const validBreakdown = (data.currenciesBreakdown || []).filter(item => parseFloat(item.amount || 0) > 0);
+
+        return (
+            <Paper
+                elevation={4}
+                sx={{
+                    p: 1.5,
+                    bgcolor: theme.palette.mode === 'dark' ? '#1e293b' : '#ffffff',
+                    border: `1px solid ${theme.palette.divider}`,
+                    borderRadius: 2,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.15)'
+                }}
+            >
+                <Typography variant="subtitle2" fontWeight={700} color="primary.main" mb={0.5}>
+                    {displayName}
+                </Typography>
+
+                {isUnifiedSelected ? (
+                    <Typography variant="caption" fontWeight={700} color="text.secondary">
+                        <bdi>{formatCurrency(data.value)}</bdi> {getCurrencySymbol(activeTargetCurrency, lang)}
+                    </Typography>
+                ) : validBreakdown.length > 0 ? (
+                    validBreakdown.map((item, idx) => (
+                        <Typography key={idx} variant="caption" display="block" color="text.secondary" fontWeight={600}>
+                            <bdi>{formatCurrency(item.amount)}</bdi> {getCurrencySymbol(item.currency, lang)}
+                        </Typography>
+                    ))
+                ) : (
+                    <Typography variant="caption" fontWeight={600} color="text.secondary">
+                        <bdi>{formatCurrency(data.value)}</bdi> {getCurrencySymbol(fallbackCurrCode, lang)}
+                    </Typography>
+                )}
+            </Paper>
+        );
+    }
+    return null;
+};
+
 const CustomChartTooltip = ({ active, payload, label, lang, baseCurrCode, isQty = false, t }) => {
     const theme = useTheme();
     const isRtl = lang === 'ar' || t?.dir === 'rtl';
@@ -167,7 +295,6 @@ const BranchDashboard = () => {
     const [jobStatus, setJobStatus] = useState(null);
     const [confirmSyncOpen, setConfirmSyncOpen] = useState(false);
 
-    // 🎯 جلب إعدادات العملة الموحدة مع قراءة الـ localStorage أولاً لضمان التطابق
     const fetchCurrencySettings = useCallback(async () => {
         try {
             const res = await API.get(`/currency/settings/${userId}`);
@@ -220,7 +347,6 @@ const BranchDashboard = () => {
         }
     }, [accountId, activeTargetCurrency]);
 
-    // 🎯 جلب أحدث مبيعات الفرع مع تمرير accountId حظرياً بدون إرسال userId حتى لا يُلغى فلتر الفرع
     const fetchRecentSalesWidgetData = useCallback(async () => {
         setSalesLoading(true);
         try {
@@ -368,7 +494,6 @@ const BranchDashboard = () => {
 
     const activeSummary = analyticsData.summary || {};
     
-    // 🎯 قراءة رمز العملة الديناميكي الموثوق من بيانات الحساب المسجلة
     const nativeAccountCurrency = analyticsData.summary?.account_currency || Object.keys(rawMetrics)[0] || 'EGP';
     const baseCurrCode = activeTargetCurrency !== 'DEFAULT'
         ? activeTargetCurrency
@@ -383,13 +508,25 @@ const BranchDashboard = () => {
     const totalUnpaidCalculated = parseFloat(activeSummary.total_unpaid || 0);
     const totalReturnsCalculated = parseFloat(activeSummary.total_returns || 0);
 
+    const statusColorMap = {
+        paid: '#2e7d32',
+        unpaid: '#ed6c02',
+        returned: '#d32f2f'
+    };
+
+    const statusTitleMap = {
+        paid: t.statusPaid || 'Paid',
+        unpaid: t.statusUnpaid || 'Unpaid / Due',
+        returned: t.statusReturned || 'Returned / Refunded'
+    };
+
     const formattedPieData = [
-        { name: t.statusPaid || 'Paid', value: totalPaidCalculated, color: '#2e7d32' },
-        { name: t.statusUnpaid || 'Unpaid / Due', value: totalUnpaidCalculated, color: '#ed6c02' },
-        { name: t.statusReturned || 'Returned / Refunded', value: totalReturnsCalculated, color: '#d32f2f' }
+        { name: 'paid', rawKey: 'paid', value: totalPaidCalculated, displayName: statusTitleMap.paid, color: statusColorMap.paid },
+        { name: 'unpaid', rawKey: 'unpaid', value: totalUnpaidCalculated, displayName: statusTitleMap.unpaid, color: statusColorMap.unpaid },
+        { name: 'returned', rawKey: 'returned', value: totalReturnsCalculated, displayName: statusTitleMap.returned, color: statusColorMap.returned }
     ].filter(item => item.value > 0);
 
-    const PIE_COLORS = ['#1976d2', '#2e7d32', '#ed6c02', '#9c27b0', '#00bcd4'];
+    const PIE_COLORS = ['#1976d2', '#2e7d32', '#ed6c02', '#9c27b0', '#00bcd4', '#ff9800', '#795548'];
 
     const chartAxisColor = theme.palette.text.secondary;
 
@@ -622,17 +759,17 @@ const BranchDashboard = () => {
                         </Grid>
                     </Grid>
 
-                    {/* 🎯 قسم المبيعات الجديد الخاص بالفرع */}
+                    {/* 🎯 قسم المبيعات وطرق الدفع بفرعك */}
                     <Grid container spacing={3} sx={{ mb: 3 }}>
                         {/* 1. Sales Collection Breakdown Donut Chart */}
                         <Grid item xs={12} md={6}>
                             <Card sx={{ height: '100%', boxShadow: '0 4px 16px rgba(0,0,0,0.04)', borderRadius: 2 }}>
                                 <CardContent sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                                     <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
-                                        {t.salesBreakdownChartTitle || (lang === 'ar' ? 'نسب توزيع المبيعات المحصلة' : 'Sales Collection Breakdown')}
+                                        {t.salesBreakdownChartTitle || (lang === 'ar' ? 'طرق الدفع' : 'Payment Methods')}
                                     </Typography>
                                     <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-                                        {t.salesBreakdownChartSubtitle || (lang === 'ar' ? 'نسبة توزيع المبيعات بحسب طريقة تحصيل الأموال بفرعك' : 'Proportional breakdown of collected sales per payment method.')}
+                                        {t.salesBreakdownChartSubtitle || (lang === 'ar' ? 'توزيع المبيعات حسب طريقة الدفع المستخدمة بفرعك.' : 'Proportional breakdown of collected sales per payment method.')}
                                     </Typography>
 
                                     <Box sx={{ width: '100%', height: 210, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -657,7 +794,13 @@ const BranchDashboard = () => {
                                                         ))}
                                                     </Pie>
                                                     <RechartsTooltip 
-                                                        content={<CustomChartTooltip lang={lang} baseCurrCode={baseCurrCode} t={t} />} 
+                                                        content={
+                                                            <CustomSalesDonutTooltip 
+                                                                lang={lang} 
+                                                                activeTargetCurrency={activeTargetCurrency} 
+                                                                fallbackCurrCode={baseCurrCode} 
+                                                            />
+                                                        } 
                                                         cursor={{ fill: 'transparent' }} 
                                                     />
                                                 </PieChart>
@@ -665,17 +808,13 @@ const BranchDashboard = () => {
                                         )}
                                     </Box>
 
-                                    <Box sx={{ mt: 'auto', pt: 1, borderTop: `1px solid ${theme.palette.divider}` }}>
+                                    {/* 🎯 الإبقاء على مفاتيح الألوان والأسماء فقط بدون إظهار أي مبالغ سفلية */}
+                                    <Box sx={{ mt: 'auto', pt: 1, borderTop: `1px solid ${theme.palette.divider}`, display: 'flex', flexWrap: 'wrap', gap: 1.5, justifyContent: 'center' }}>
                                         {salesBreakdown.map((item, idx) => (
-                                            <Box key={item.name} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.3 }}>
-                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                                    <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: PIE_COLORS[idx % PIE_COLORS.length] }} />
-                                                    <Typography variant="caption" fontWeight={600} sx={{ textTransform: 'capitalize' }}>
-                                                        {item.name === 'cash' ? (lang === 'ar' ? 'نقداً (Cash)' : 'Cash') : item.name === 'bank' ? (lang === 'ar' ? 'تحويل بنكي' : 'Bank Transfer') : item.name}
-                                                    </Typography>
-                                                </Box>
-                                                <Typography variant="caption" fontWeight={700} color={PIE_COLORS[idx % PIE_COLORS.length]}>
-                                                    <bdi>{formatCurrency(item.value)}</bdi> {getCurrencySymbol(baseCurrCode, lang)}
+                                            <Box key={item.rawKey || item.name} sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                                                <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: PIE_COLORS[idx % PIE_COLORS.length] }} />
+                                                <Typography variant="caption" fontWeight={600} color="text.primary">
+                                                    {formatDynamicMethodName(item.rawKey || item.name, lang)}
                                                 </Typography>
                                             </Box>
                                         ))}
@@ -690,7 +829,7 @@ const BranchDashboard = () => {
                                 <CardContent>
                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                                         <Typography variant="subtitle1" fontWeight={700}>
-                                            {t.recentSalesTitle || (lang === 'ar' ? 'أحدث المبيعات والتحصيلات' : 'Recent Sales & Receipts')}
+                                            {t.recentSalesTitle || (lang === 'ar' ? 'أحدث المقبوضات والمدفوعات' : 'Recent Sales & Receipts')}
                                         </Typography>
                                         <Button size="small" onClick={() => navigate(`/payments?accountId=${accountId}`)}>
                                             {t.viewAll || 'View All'}
@@ -727,7 +866,12 @@ const BranchDashboard = () => {
                                                                     <bdi>{formatCurrency(sale.amount)}</bdi> {getCurrencySymbol(sale.display_currency || baseCurrCode, lang)}
                                                                 </TableCell>
                                                                 <TableCell align="center">
-                                                                    <Chip label={sale.payment_method || 'cash'} size="small" variant="outlined" sx={{ fontSize: '10.5px', textTransform: 'capitalize', fontWeight: 600, height: 20 }} />
+                                                                    <Chip 
+                                                                        label={formatDynamicMethodName(sale.payment_method, lang)} 
+                                                                        size="small" 
+                                                                        variant="outlined" 
+                                                                        sx={{ fontSize: '10.5px', fontWeight: 600, height: 20 }} 
+                                                                    />
                                                                 </TableCell>
                                                             </TableRow>
                                                         ))
@@ -742,6 +886,7 @@ const BranchDashboard = () => {
                     </Grid>
 
                     <Grid container spacing={3} sx={{ mb: 3 }}>
+                        {/* 🎯 Collection Status Donut Chart */}
                         <Grid item xs={12} md={6}>
                             <Card sx={{ height: '100%', boxShadow: '0 4px 16px rgba(0,0,0,0.04)', borderRadius: 2 }}>
                                 <CardContent sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -772,7 +917,14 @@ const BranchDashboard = () => {
                                                         ))}
                                                     </Pie>
                                                     <RechartsTooltip 
-                                                        content={<CustomChartTooltip lang={lang} baseCurrCode={baseCurrCode} t={t} />} 
+                                                        content={
+                                                            <CustomCollectionDonutTooltip 
+                                                                lang={lang} 
+                                                                activeTargetCurrency={activeTargetCurrency} 
+                                                                fallbackCurrCode={baseCurrCode}
+                                                                t={t}
+                                                            />
+                                                        } 
                                                         cursor={{ fill: 'transparent' }} 
                                                     />
                                                 </PieChart>
@@ -780,15 +932,13 @@ const BranchDashboard = () => {
                                         )}
                                     </Box>
 
-                                    <Box sx={{ mt: 'auto', pt: 1, borderTop: `1px solid ${theme.palette.divider}` }}>
+                                    {/* 🎯 الإبقاء على الأسماء والألوان فقط بدون إظهار أي مبالغ سفلية */}
+                                    <Box sx={{ mt: 'auto', pt: 1, borderTop: `1px solid ${theme.palette.divider}`, display: 'flex', flexWrap: 'wrap', gap: 1.5, justifyContent: 'center' }}>
                                         {formattedPieData.map((item) => (
-                                            <Box key={item.name} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.3 }}>
-                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                                    <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: item.color }} />
-                                                    <Typography variant="caption" fontWeight={600}>{item.name}</Typography>
-                                                </Box>
-                                                <Typography variant="caption" fontWeight={700} color={item.color}>
-                                                    <bdi>{formatCurrency(item.value)}</bdi> {getCurrencySymbol(baseCurrCode, lang)}
+                                            <Box key={item.rawKey || item.name} sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                                                <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: item.color }} />
+                                                <Typography variant="caption" fontWeight={600} color="text.primary">
+                                                    {item.displayName || item.name}
                                                 </Typography>
                                             </Box>
                                         ))}
@@ -797,6 +947,7 @@ const BranchDashboard = () => {
                             </Card>
                         </Grid>
 
+                        {/* Recent Invoices Table */}
                         <Grid item xs={12} md={6}>
                             <Card sx={{ height: '100%', boxShadow: '0 4px 16px rgba(0,0,0,0.04)', borderRadius: 2 }}>
                                 <CardContent>

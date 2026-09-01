@@ -1,9 +1,9 @@
 const pool = require('../config/db');
 const axios = require('axios');
-const { 
-    executeFullAccountSync, 
+const {
+    executeFullAccountSync,
     executeBulkUserSync,
-    recalculateGlobalUserRollup, 
+    recalculateGlobalUserRollup,
     updateJobProgress,
     syncChartOfAccounts
 } = require('../services/syncService');
@@ -22,7 +22,7 @@ const getGlobalRecentWidgets = async (req, res) => {
         const activeCurrency = isUnified ? targetCurrency.toUpperCase().trim() : 'DEFAULT';
 
         const recentAccounts = await pool.query(
-            'SELECT id, account_name, daftra_subdomain, currency_code, created_at FROM linked_accounts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5;', 
+            'SELECT id, account_name, daftra_subdomain, currency_code, created_at FROM linked_accounts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5;',
             [userId]
         );
 
@@ -65,8 +65,8 @@ const getGlobalRecentWidgets = async (req, res) => {
         });
 
         res.json({ accounts: recentAccounts.rows, invoices: processedInvoices, clients: recentClients.rows });
-    } catch (err) { 
-        res.status(500).json({ error: err.message }); 
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -123,8 +123,8 @@ const getBranchRecentWidgets = async (req, res) => {
         });
 
         res.json({ invoices: processedInvoices, clients: recentClients.rows });
-    } catch (err) { 
-        res.status(500).json({ error: err.message }); 
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -134,11 +134,13 @@ const getBranchRecentWidgets = async (req, res) => {
 const getRecentSalesWidget = async (req, res) => {
     try {
         let { accountId, targetCurrency } = req.query;
-        const userId = req.user.userId; // 🎯 أمان
+        const userId = req.user.userId;
 
-        // 🎯 أمان: التحقق من ملكية الحساب إذا تم تمريره
         if (accountId) {
-            const accUserRes = await pool.query('SELECT user_id FROM linked_accounts WHERE id = $1::int AND user_id = $2::int', [parseInt(accountId, 10), parseInt(userId, 10)]);
+            const accUserRes = await pool.query(
+                'SELECT user_id FROM linked_accounts WHERE id = $1::int AND user_id = $2::int',
+                [parseInt(accountId, 10), parseInt(userId, 10)]
+            );
             if (accUserRes.rows.length === 0) {
                 return res.status(403).json({ error: "Unauthorized" });
             }
@@ -148,63 +150,63 @@ const getRecentSalesWidget = async (req, res) => {
         const isUnified = !!(targetCurrency && targetCurrency !== 'DEFAULT');
         const activeCurrency = isUnified ? targetCurrency.toUpperCase().trim() : 'DEFAULT';
 
-        // 2. شرط التصفية الصريح حسب النطاق (فرع أو جلوبال)
-        const filterClause = accountId ? `ic.account_id = $1::int` : `la.user_id = $1::int`;
+        const filterClause = accountId ? `ipc.account_id = $1::int` : `la.user_id = $1::int`;
         const queryParams = accountId ? [parseInt(accountId, 10)] : [parseInt(userId, 10)];
 
-        // 3. أحدث 5 عمليات مبيعات من جدول الفواتير المعتمدة مباشرةً
-        const recentSalesQuery = `
+        // 🎯 1. أحدث 5 مدفوعات نقدية/بنكية فعلية (مستبعد منها الـ Starting Balance)
+        const recentPaymentsQuery = `
             SELECT 
-                ic.id,
-                ic.invoice_no,
-                ic.base_total_amount AS amount,
-                ic.currency_code,
-                ic.issue_date AS payment_date,
+                ipc.id,
+                COALESCE(ipc.invoice_no, CONCAT('دفعة #', ipc.daftra_payment_id)) AS invoice_no,
+                ipc.amount AS raw_amount,
+                ipc.base_amount AS amount,
+                ipc.currency_code,
+                ipc.payment_date,
                 COALESCE(c.client_name, 'عميل') AS client_name,
                 la.account_name,
                 la.currency_code AS account_base_currency,
                 COALESCE(bc.name, 'الفرع الرئيسي') AS branch_name,
-                'cash' AS payment_method
-            FROM invoices_cache ic
-            JOIN linked_accounts la ON ic.account_id = la.id
+                LOWER(TRIM(ipc.payment_method)) AS payment_method
+            FROM invoice_payments_cache ipc
+            JOIN linked_accounts la ON ipc.account_id = la.id
             LEFT JOIN clients_cache c 
-                   ON ic.account_id = c.account_id 
-                  AND TRIM(ic.client_id::text) = TRIM(c.daftra_client_id::text)
+                ON ipc.account_id = c.account_id 
+                AND TRIM(ipc.client_id::text) = TRIM(c.daftra_client_id::text)
             LEFT JOIN branches_cache bc 
-                   ON ic.account_id = bc.account_id 
-                  AND ic.branch_id = bc.daftra_branch_id
+                ON ipc.account_id = bc.account_id 
+                AND ipc.branch_id = bc.daftra_branch_id
             WHERE ${filterClause}
-              AND (ic.is_return IS NULL OR ic.is_return != 1)
-              AND (ic.draft IS NULL OR ic.draft = 0)
-            ORDER BY ic.issue_date DESC, ic.id DESC
+            AND ipc.amount > 0 
+            AND LOWER(TRIM(ipc.payment_method)) != 'starting_balance'
+            AND (ipc.payment_type IS NULL OR ipc.payment_type != 'starting_balance')
+            ORDER BY ipc.payment_date DESC, ipc.id DESC
             LIMIT 5;
         `;
 
-        // 4. توزيع المبيعات بحسب حالة التحصيل للرسم البياني الدائري
+        // 🎯 2. تجميع المبيعات حسب طريقة الدفع وعملة الحساب نفسه
         const breakdownQuery = `
             SELECT 
-                CASE 
-                    WHEN ic.payment_status = 2 THEN 'cash'
-                    WHEN ic.payment_status = 1 THEN 'bank'
-                    ELSE 'credit'
-                END AS payment_method,
-                la.currency_code AS account_base_currency,
-                COALESCE(SUM(ic.base_total_amount), 0) AS total_amount
-            FROM invoices_cache ic
-            JOIN linked_accounts la ON ic.account_id = la.id
+                LOWER(TRIM(ipc.payment_method)) AS payment_method,
+                UPPER(TRIM(la.currency_code)) AS currency_code,
+                COALESCE(SUM(ipc.amount), 0) AS total_original_amount,
+                COALESCE(SUM(ipc.base_amount), 0) AS total_base_amount
+            FROM invoice_payments_cache ipc
+            JOIN linked_accounts la ON ipc.account_id = la.id
             WHERE ${filterClause}
-              AND (ic.is_return IS NULL OR ic.is_return != 1)
-              AND (ic.draft IS NULL OR ic.draft = 0)
-            GROUP BY 1, la.currency_code;
+            AND ipc.amount > 0
+            AND LOWER(TRIM(ipc.payment_method)) != 'starting_balance'
+            AND (ipc.payment_type IS NULL OR ipc.payment_type != 'starting_balance')
+            AND ipc.payment_date >= CURRENT_DATE - INTERVAL '30 days'
+            GROUP BY 1, 2;
         `;
 
         const [recentRes, breakdownRes] = await Promise.all([
-            pool.query(recentSalesQuery, queryParams),
+            pool.query(recentPaymentsQuery, queryParams),
             pool.query(breakdownQuery, queryParams)
         ]);
 
         const processedSales = recentRes.rows.map(row => {
-            const accCurr = (row.account_base_currency || row.currency_code || 'EGP').toUpperCase().trim();
+            const accCurr = (row.currency_code || row.account_base_currency || 'EGP').toUpperCase().trim();
             const rawAmount = parseFloat(row.amount || 0);
 
             return {
@@ -215,21 +217,40 @@ const getRecentSalesWidget = async (req, res) => {
             };
         });
 
-        // 5. تجهيز بيانات الكيكة للرسم البياني
-        const methodTotals = {};
-        breakdownRes.rows.forEach(row => {
-            const accCurr = (row.account_base_currency || 'EGP').toUpperCase().trim();
-            const method = row.payment_method || 'cash';
-            const rawAmt = parseFloat(row.total_amount || 0);
-            const amt = isUnified ? convertToActiveCurrency(rawAmt, accCurr, activeCurrency, currencyContext.exchangeRates) : rawAmt;
+        // 🎯 3. هيكلة البيانات لدعم الـ Hover وتفاصيل كل عملة بصورة دقيقة
+        const methodsMap = {};
 
-            methodTotals[method] = (methodTotals[method] || 0) + amt;
+        breakdownRes.rows.forEach(row => {
+            const methodKey = row.payment_method || 'cash';
+            const curr = (row.currency_code || 'EGP').toUpperCase().trim();
+            const origAmt = parseFloat(row.total_original_amount || 0);
+            const baseAmt = parseFloat(row.total_base_amount || 0);
+
+            const calculatedAmt = isUnified
+                ? convertToActiveCurrency(baseAmt, curr, activeCurrency, currencyContext.exchangeRates)
+                : baseAmt;
+
+            if (!methodsMap[methodKey]) {
+                methodsMap[methodKey] = {
+                    totalChartValue: 0,
+                    currencies: {}
+                };
+            }
+
+            methodsMap[methodKey].totalChartValue += calculatedAmt;
+            methodsMap[methodKey].currencies[curr] = (methodsMap[methodKey].currencies[curr] || 0) + origAmt;
         });
 
-        const breakdownChartData = Object.keys(methodTotals).map(m => ({
-            name: m,
-            value: methodTotals[m],
-            currency: isUnified ? activeCurrency : 'EGP'
+        const breakdownChartData = Object.keys(methodsMap).map(methodKey => ({
+            rawKey: methodKey,
+            name: methodKey,
+            value: methodsMap[methodKey].totalChartValue,
+            currenciesBreakdown: Object.keys(methodsMap[methodKey].currencies)
+                .filter(c => parseFloat(methodsMap[methodKey].currencies[c] || 0) > 0)
+                .map(c => ({
+                    currency: c,
+                    amount: methodsMap[methodKey].currencies[c]
+                }))
         }));
 
         return res.json({
@@ -250,7 +271,7 @@ const getRecentSalesWidget = async (req, res) => {
 const getLedgersPaginated = async (req, res) => {
     try {
         const userId = req.user.userId; // 🎯 أمان
-        const { accountId, page = 1, limit = 10, targetCurrency } = req.query; 
+        const { accountId, page = 1, limit = 10, targetCurrency } = req.query;
         const parsedLimit = parseInt(limit, 10);
         const offset = (parseInt(page, 10) - 1) * parsedLimit;
 
@@ -330,7 +351,6 @@ const getLedgersPaginated = async (req, res) => {
             const accCurr = (row.account_base_currency || 'EGP').toUpperCase().trim();
             const invCurr = (row.currency_code || accCurr).toUpperCase().trim();
 
-            // 1. المبالغ الأصلية بـ عملة الفاتورة
             const origGrossSubtotal = parseFloat(row.gross_subtotal || 0);
             const origNetRevenue = parseFloat(row.net_revenue || 0);
             const origTax = parseFloat(row.tax_amount || 0);
@@ -338,13 +358,11 @@ const getLedgersPaginated = async (req, res) => {
             const origSummaryPaid = parseFloat(row.summary_paid || 0);
             const origSummaryUnpaid = parseFloat(row.summary_unpaid || 0);
 
-            // 2. سعر الصرف الفعلي للفاتورة
             let rate = parseFloat(row.exchange_rate || 1);
             if (rate === 1 && origTotalAmount > 0 && row.base_total_amount) {
                 rate = parseFloat(row.base_total_amount) / origTotalAmount;
             }
 
-            // 3. حساب المبالغ المحولة بالعملة الأساسية (Base Amounts) بدقة
             const baseGrossSubtotal = origGrossSubtotal * rate;
             const baseNetRevenue = parseFloat(row.base_net_revenue || (origNetRevenue * rate));
             const baseTax = origTax * rate;
@@ -360,7 +378,6 @@ const getLedgersPaginated = async (req, res) => {
                 account_base_currency: accCurr,
                 exchange_rate: rate,
 
-                // القيم العادية
                 gross_subtotal: isUnified ? convertToActiveCurrency(baseGrossSubtotal, accCurr, activeCurrency, currencyContext.exchangeRates) : origGrossSubtotal,
                 net_revenue: isUnified ? convertToActiveCurrency(baseNetRevenue, accCurr, activeCurrency, currencyContext.exchangeRates) : origNetRevenue,
                 tax_amount: isUnified ? convertToActiveCurrency(baseTax, accCurr, activeCurrency, currencyContext.exchangeRates) : origTax,
@@ -368,7 +385,6 @@ const getLedgersPaginated = async (req, res) => {
                 summary_paid: isUnified ? convertToActiveCurrency(baseSummaryPaid, accCurr, activeCurrency, currencyContext.exchangeRates) : origSummaryPaid,
                 summary_unpaid: isUnified ? convertToActiveCurrency(baseSummaryUnpaid, accCurr, activeCurrency, currencyContext.exchangeRates) : origSummaryUnpaid,
 
-                // القيم المحولة بالعملة الأساسية للحساب (EGP)
                 base_gross_subtotal: isUnified ? convertToActiveCurrency(baseGrossSubtotal, accCurr, activeCurrency, currencyContext.exchangeRates) : baseGrossSubtotal,
                 base_net_revenue: isUnified ? convertToActiveCurrency(baseNetRevenue, accCurr, activeCurrency, currencyContext.exchangeRates) : baseNetRevenue,
                 base_tax_amount: isUnified ? convertToActiveCurrency(baseTax, accCurr, activeCurrency, currencyContext.exchangeRates) : baseTax,
@@ -379,12 +395,12 @@ const getLedgersPaginated = async (req, res) => {
             };
         });
 
-        res.json({ 
-            data: processedRows, 
-            pagination: { page: parseInt(page, 10), limit: parsedLimit, totalRows, totalPages: Math.ceil(totalRows / parsedLimit) } 
+        res.json({
+            data: processedRows,
+            pagination: { page: parseInt(page, 10), limit: parsedLimit, totalRows, totalPages: Math.ceil(totalRows / parsedLimit) }
         });
-    } catch (err) { 
-        res.status(500).json({ error: err.message }); 
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -394,11 +410,10 @@ const getLedgersPaginated = async (req, res) => {
 const getClientsPaginated = async (req, res) => {
     try {
         const userId = req.user.userId; // 🎯 أمان
-        const { accountId, page = 1, limit = 10, targetCurrency } = req.query; 
+        const { accountId, page = 1, limit = 10, targetCurrency } = req.query;
         const parsedLimit = parseInt(limit, 10);
         const offset = (parseInt(page, 10) - 1) * parsedLimit;
 
-        // 🎯 أمان
         if (accountId) {
             const accUserRes = await pool.query('SELECT user_id FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
             if (accUserRes.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
@@ -496,13 +511,13 @@ const getClientsPaginated = async (req, res) => {
             };
         });
 
-        res.json({ 
-            data: processedRows, 
-            pagination: { page: parseInt(page, 10), limit: parsedLimit, totalRows, totalPages: Math.ceil(totalRows / parsedLimit) } 
+        res.json({
+            data: processedRows,
+            pagination: { page: parseInt(page, 10), limit: parsedLimit, totalRows, totalPages: Math.ceil(totalRows / parsedLimit) }
         });
-    } catch (err) { 
+    } catch (err) {
         console.error("❌ [getClientsPaginated] Database Error:", err.message);
-        res.status(500).json({ error: err.message }); 
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -512,9 +527,8 @@ const getClientsPaginated = async (req, res) => {
 const getClientStatementHtml = async (req, res) => {
     try {
         const { accountId, clientId } = req.params;
-        const userId = req.user.userId; // 🎯 أمان
+        const userId = req.user.userId;
 
-        // 🎯 أمان: تأمين جلب كشف الحساب
         const accountResult = await pool.query(
             'SELECT daftra_subdomain, encrypted_access_token FROM linked_accounts WHERE id = $1 AND user_id = $2;',
             [accountId, userId]
@@ -569,7 +583,7 @@ const getGlobalAnalytics = async (req, res) => {
         const { targetCurrency } = req.query;
 
         const currencyContext = await getUserCurrencyContext(userId);
-        
+
         const isUnified = !!(targetCurrency && targetCurrency !== 'DEFAULT');
         const activeCurrency = isUnified ? targetCurrency.toUpperCase().trim() : 'DEFAULT';
 
@@ -594,7 +608,9 @@ const getGlobalAnalytics = async (req, res) => {
                             WHEN ic.is_return = 2 THEN COALESCE(rc.base_total_amount, 0)
                             ELSE 0 
                         END
-                    ), 0) AS partial_returns_tax_incl
+                    ), 0) AS partial_returns_tax_incl,
+                    COALESCE(SUM(ic.summary_paid), 0) AS orig_sales_paid,
+                    COALESCE(SUM(ic.summary_unpaid), 0) AS orig_sales_unpaid
                 FROM invoices_cache ic
                 JOIN linked_accounts la ON ic.account_id = la.id
                 LEFT JOIN returns_cache rc 
@@ -609,7 +625,8 @@ const getGlobalAnalytics = async (req, res) => {
                 SELECT 
                     la.user_id,
                     rc.account_id,
-                    COALESCE(SUM(rc.base_total_amount), 0) AS total_returns_tax_incl
+                    COALESCE(SUM(rc.base_total_amount), 0) AS total_returns_tax_incl,
+                    COALESCE(SUM(rc.total_amount), 0) AS orig_total_returns
                 FROM returns_cache rc
                 JOIN linked_accounts la ON rc.account_id = la.id
                 WHERE la.user_id = $1
@@ -635,6 +652,9 @@ const getGlobalAnalytics = async (req, res) => {
                 COALESCE(ret.total_returns_tax_incl, 0) AS total_returns,
                 COALESCE(inv.sales_paid_net, 0) AS total_paid,
                 COALESCE(inv.sales_unpaid_tax_incl, 0) AS total_unpaid,
+                COALESCE(inv.orig_sales_paid, 0) AS orig_total_paid,
+                COALESCE(inv.orig_sales_unpaid, 0) AS orig_total_unpaid,
+                COALESCE(ret.orig_total_returns, 0) AS orig_total_returns,
                 (COALESCE(cs.chart_incomes, 0) - COALESCE(cs.chart_expenses, 0)) AS net_profit
             FROM linked_accounts la
             LEFT JOIN inv_totals inv ON la.id = inv.account_id
@@ -729,9 +749,16 @@ const getGlobalAnalytics = async (req, res) => {
             breakdown_by_currency: {}
         };
 
+        // 🎯 تجميع تراكيب العملات المخصصة لكارت حالة تحصيل الفواتير
+        const collectionMap = {
+            paid: { value: 0, currencies: {} },
+            unpaid: { value: 0, currencies: {} },
+            returned: { value: 0, currencies: {} }
+        };
+
         summaryRes.rows.forEach(row => {
             const accCurr = (row.account_currency || 'EGP').toUpperCase().trim();
-            
+
             const rawRev = parseFloat(row.invoices_revenue || 0);
             const rawCogs = parseFloat(row.total_cogs || 0);
             const rawRet = parseFloat(row.total_returns || 0);
@@ -754,6 +781,16 @@ const getGlobalAnalytics = async (req, res) => {
             summary.total_unpaid += unpaid;
             summary.net_profit += profit;
 
+            // 🎯 نضمن إن كارت الشارت يقرأ نفس المبالغ الحقيقية المباشرة (rawPaid, rawUnpaid, rawRet) لكل عملة
+            collectionMap.paid.value += paid;
+            collectionMap.paid.currencies[accCurr] = (collectionMap.paid.currencies[accCurr] || 0) + rawPaid;
+
+            collectionMap.unpaid.value += unpaid;
+            collectionMap.unpaid.currencies[accCurr] = (collectionMap.unpaid.currencies[accCurr] || 0) + rawUnpaid;
+
+            collectionMap.returned.value += returns;
+            collectionMap.returned.currencies[accCurr] = (collectionMap.returned.currencies[accCurr] || 0) + rawRet;
+
             if (!summary.breakdown_by_currency[accCurr]) {
                 summary.breakdown_by_currency[accCurr] = {
                     invoices_revenue: 0, total_revenue: 0, total_cogs: 0, total_returns: 0, total_paid: 0, total_unpaid: 0, net_profit: 0
@@ -767,6 +804,18 @@ const getGlobalAnalytics = async (req, res) => {
             summary.breakdown_by_currency[accCurr].total_unpaid += rawUnpaid;
             summary.breakdown_by_currency[accCurr].net_profit += rawProfit;
         });
+
+        // 🎯 فلترة الـ Breakdown للعملات التي تمتلك مبالغ فعلية أكبر من الصفر فقط
+        const paymentStatusBreakdownFormatted = Object.keys(collectionMap).map(key => ({
+            name: key,
+            value: collectionMap[key].value,
+            currenciesBreakdown: Object.keys(collectionMap[key].currencies)
+                .filter(c => parseFloat(collectionMap[key].currencies[c] || 0) > 0)
+                .map(c => ({
+                    currency: c,
+                    amount: collectionMap[key].currencies[c]
+                }))
+        }));
 
         const processedTreasuries = treasuriesRes.rows.map(t => {
             const accCurr = (t.account_currency || 'EGP').toUpperCase().trim();
@@ -822,7 +871,7 @@ const getGlobalAnalytics = async (req, res) => {
         res.json({
             summary,
             treasuries: processedTreasuries,
-            paymentStatusBreakdown: statusRes.rows,
+            paymentStatusBreakdown: paymentStatusBreakdownFormatted,
             topClients: processedTopClients,
             branchComparison: processedBranchComparison,
             accountPaymentStatus: processedAccountPaymentStatus
@@ -843,7 +892,6 @@ const getBranchAnalytics = async (req, res) => {
         const userId = req.user.userId; // 🎯 أمان
         const { currency, targetCurrency } = req.query;
 
-        // 🎯 أمان
         const accountRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1 AND user_id = $2;', [accountId, userId]);
         if (accountRes.rows.length === 0) {
             return res.status(403).json({ error: "Unauthorized or Branch account not found" });
@@ -852,7 +900,7 @@ const getBranchAnalytics = async (req, res) => {
         const accountBaseCurrency = (accountRes.rows[0].currency_code || 'EGP').toUpperCase().trim();
 
         const currencyContext = await getUserCurrencyContext(userId);
-        
+
         const isUnified = !!(targetCurrency && targetCurrency !== 'DEFAULT');
         const activeCurrency = isUnified ? targetCurrency.toUpperCase().trim() : accountBaseCurrency;
 
@@ -1129,8 +1177,8 @@ const getSummary = async (req, res) => {
         });
 
         res.json(summaryByCurrency);
-    } catch (err) { 
-        res.status(500).json({ error: err.message }); 
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -1281,7 +1329,6 @@ const getUserPayments = async (req, res) => {
         let queryParams = [parseInt(userId, 10)];
 
         if (accountId && accountId !== 'null' && accountId !== 'undefined') {
-            // 🎯 أمان إضافي للفرع
             const checkAuth = await pool.query('SELECT 1 FROM linked_accounts WHERE id = $1 AND user_id = $2', [parseInt(accountId, 10), parseInt(userId, 10)]);
             if (checkAuth.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
 
@@ -1328,7 +1375,7 @@ const getUserPayments = async (req, res) => {
                   )
             ${accountFilter}
             ORDER BY p.payment_date DESC, p.daftra_payment_id DESC, p.id DESC
-            LIMIT 1000; -- 🎯 أمان الذاكرة
+            LIMIT 1000;
         `;
         const result = await pool.query(query, queryParams);
 
@@ -1370,7 +1417,7 @@ const syncBranch = async (req, res) => {
         const config = { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' } };
 
         const jobResult = await pool.query(
-            "INSERT INTO sync_jobs (user_id, account_id, status, current_step) VALUES ($1, $2, 'pending', 'initializing') RETURNING id;", 
+            "INSERT INTO sync_jobs (user_id, account_id, status, current_step) VALUES ($1, $2, 'pending', 'initializing') RETURNING id;",
             [userId, accountId]
         );
         const jobId = jobResult.rows[0].id;
@@ -1395,7 +1442,7 @@ const syncAll = async (req, res) => {
         if (accountsResult.rows.length === 0) return res.status(200).json({ message: "No connected accounts found to synchronize." });
 
         const jobResult = await pool.query(
-            "INSERT INTO sync_jobs (user_id, account_id, status, current_step) VALUES ($1, null, 'pending', 'initializing') RETURNING id;", 
+            "INSERT INTO sync_jobs (user_id, account_id, status, current_step) VALUES ($1, null, 'pending', 'initializing') RETURNING id;",
             [userId]
         );
         const jobId = jobResult.rows[0].id;
@@ -1469,10 +1516,10 @@ const getTreasuryDailyTotals = async (req, res) => {
             WHERE dt.account_id = $1
             ORDER BY dt.journal_account_id ASC;
         `, [accountId]);
-        
+
         res.json(result.rows);
-    } catch (err) { 
-        res.status(500).json({ error: err.message }); 
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -1509,7 +1556,6 @@ const getUserTreasuries = async (req, res) => {
         const queryParams = [userId];
 
         if (accountId) {
-            // 🎯 أمان إضافي
             const checkAuth = await pool.query('SELECT 1 FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
             if (checkAuth.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
 
@@ -1566,7 +1612,7 @@ const getTreasuryHeader = async (req, res) => {
             FROM treasuries_cache tc
             JOIN linked_accounts la ON tc.account_id = la.id
             LEFT JOIN branches_cache bc ON tc.account_id = bc.account_id AND tc.branch_id = bc.daftra_branch_id
-            WHERE tc.account_id = $1 AND tc.journal_account_id = $2 AND la.user_id = $3; -- 🎯 أمان
+            WHERE tc.account_id = $1 AND tc.journal_account_id = $2 AND la.user_id = $3;
         `;
         const result = await pool.query(query, [accountId, journalAccountId, userId]);
         if (result.rows.length === 0) {
@@ -1609,7 +1655,6 @@ const getTreasuryTransactionsPaginated = async (req, res) => {
         const parsedPage = parseInt(page, 10);
         const offset = (parsedPage - 1) * parsedLimit;
 
-        // 🎯 أمان
         const accUserRes = await pool.query('SELECT user_id, currency_code FROM linked_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
         if (accUserRes.rows.length === 0) return res.status(403).json({ error: "Unauthorized" });
 

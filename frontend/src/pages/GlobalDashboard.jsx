@@ -61,7 +61,7 @@ import { getCurrencySymbol, getCurrencyFullName } from '../i18n/currencies';
 
 const STEP_KEY_MAP = {
     initializing:             'stepInitializing',
-    calculating_totals:      'stepCalculatingTotals',
+    calculating_totals:       'stepCalculatingTotals',
     fetching_transactions:    'stepTransactions',
     fetching_invoices:        'stepInvoices',
     fetching_clients:         'stepClients',
@@ -69,7 +69,7 @@ const STEP_KEY_MAP = {
     processing_product_sales: 'stepProductSales',
     fetching_expenses:        'stepExpenses',
     fetching_incomes:         'stepIncomes',
-    final_rollup:            'stepRollup',
+    final_rollup:             'stepRollup',
 };
 
 const STATUS_CHIP_MAP = {
@@ -78,6 +78,138 @@ const STATUS_CHIP_MAP = {
     syncing:   { labelKey: 'syncStatusSyncing', color: 'warning' },
     error:     { labelKey: 'syncStatusError',   color: 'error'   },
     pending:   { labelKey: 'syncStatusPending', color: 'default' },
+};
+
+// 🎯 دالة ديناميكية لتنظيف وإظهار أي اسم طريقة دفع قادم من الـ API
+const formatDynamicMethodName = (rawName, lang = 'ar') => {
+    if (!rawName) return '';
+    
+    // القاموس للترجمات الثابتة الشهيرة
+    const knownTranslations = {
+        cash: { ar: 'نقداً', en: 'Cash' },
+        bank_transfer: { ar: 'تحويل بنكي', en: 'Bank Transfer' },
+        bank: { ar: 'تحويل بنكي', en: 'Bank Transfer' },
+        client_credit: { ar: 'رصيد عميل', en: 'Client Credit' },
+        check: { ar: 'شيك', en: 'Check' },
+        visa: { ar: 'بطاقة إئتمان', en: 'Visa / Card' },
+        network: { ar: 'شبكة / مدى', en: 'POS Network' },
+        credit: { ar: 'آجل / غير مسدد', en: 'Credit / Unpaid' }
+    };
+
+    const cleanKey = rawName.toString().toLowerCase().trim();
+    if (knownTranslations[cleanKey]) {
+        return knownTranslations[cleanKey][lang] || knownTranslations[cleanKey].en;
+    }
+
+    // تنظيف الـ _ والـ - وجعله Capitalized ديناميكياً
+    const formatted = rawName
+        .toString()
+        .replace(/[_-]/g, ' ')
+        .trim();
+
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+};
+
+// 🎯 Tooltip طريقة الدفع (Sales Donut) مع فلترة الأصفار
+const CustomSalesDonutTooltip = ({ active, payload, lang, activeTargetCurrency, fallbackCurrCode }) => {
+    const theme = useTheme();
+    if (active && payload && payload.length) {
+        const data = payload[0].payload;
+        const displayName = formatDynamicMethodName(data.rawKey || data.name, lang);
+        const isUnifiedSelected = activeTargetCurrency && activeTargetCurrency !== 'DEFAULT';
+
+        // 🎯 فلترة العملات لتخطي أي مبلغ قيمته صفر (0)
+        const validBreakdown = (data.currenciesBreakdown || []).filter(item => parseFloat(item.amount || 0) > 0);
+
+        return (
+            <Paper
+                elevation={4}
+                sx={{
+                    p: 1.5,
+                    bgcolor: theme.palette.mode === 'dark' ? '#1e293b' : '#ffffff',
+                    border: `1px solid ${theme.palette.divider}`,
+                    borderRadius: 2,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.15)'
+                }}
+            >
+                <Typography variant="subtitle2" fontWeight={700} color="primary.main" mb={0.5}>
+                    {displayName}
+                </Typography>
+
+                {isUnifiedSelected ? (
+                    <Typography variant="caption" fontWeight={700} color="text.secondary">
+                        <bdi>{formatCurrency(data.value)}</bdi> {getCurrencySymbol(activeTargetCurrency, lang)}
+                    </Typography>
+                ) : validBreakdown.length > 0 ? (
+                    validBreakdown.map((item, idx) => (
+                        <Typography key={idx} variant="caption" display="block" color="text.secondary" fontWeight={600}>
+                            <bdi>{formatCurrency(item.amount)}</bdi> {getCurrencySymbol(item.currency, lang)}
+                        </Typography>
+                    ))
+                ) : (
+                    <Typography variant="caption" fontWeight={600} color="text.secondary">
+                        <bdi>{formatCurrency(data.value)}</bdi> {getCurrencySymbol(fallbackCurrCode, lang)}
+                    </Typography>
+                )}
+            </Paper>
+        );
+    }
+    return null;
+};
+
+// 🎯 Tooltip حالة التحصيل (Collection Status) مع فلترة الأصفار
+const CustomCollectionDonutTooltip = ({ active, payload, lang, activeTargetCurrency, fallbackCurrCode, t }) => {
+    const theme = useTheme();
+    if (active && payload && payload.length) {
+        const data = payload[0].payload;
+        
+        const statusNames = {
+            paid: t?.statusPaid || (lang === 'ar' ? 'المحصل' : 'Paid'),
+            unpaid: t?.statusUnpaid || (lang === 'ar' ? 'المتبقي / المستحق' : 'Unpaid / Due'),
+            returned: t?.statusReturned || (lang === 'ar' ? 'المرتجعات' : 'Returned')
+        };
+
+        const rawNameKey = data.rawKey || data.name;
+        const displayName = statusNames[rawNameKey] || data.name;
+        const isUnifiedSelected = activeTargetCurrency && activeTargetCurrency !== 'DEFAULT';
+
+        // 🎯 فلترة العملات لتخطي أي مبلغ قيمته صفر (0)
+        const validBreakdown = (data.currenciesBreakdown || []).filter(item => parseFloat(item.amount || 0) > 0);
+
+        return (
+            <Paper
+                elevation={4}
+                sx={{
+                    p: 1.5,
+                    bgcolor: theme.palette.mode === 'dark' ? '#1e293b' : '#ffffff',
+                    border: `1px solid ${theme.palette.divider}`,
+                    borderRadius: 2,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.15)'
+                }}
+            >
+                <Typography variant="subtitle2" fontWeight={700} color="primary.main" mb={0.5}>
+                    {displayName}
+                </Typography>
+
+                {isUnifiedSelected ? (
+                    <Typography variant="caption" fontWeight={700} color="text.secondary">
+                        <bdi>{formatCurrency(data.value)}</bdi> {getCurrencySymbol(activeTargetCurrency, lang)}
+                    </Typography>
+                ) : validBreakdown.length > 0 ? (
+                    validBreakdown.map((item, idx) => (
+                        <Typography key={idx} variant="caption" display="block" color="text.secondary" fontWeight={600}>
+                            <bdi>{formatCurrency(item.amount)}</bdi> {getCurrencySymbol(item.currency, lang)}
+                        </Typography>
+                    ))
+                ) : (
+                    <Typography variant="caption" fontWeight={600} color="text.secondary">
+                        <bdi>{formatCurrency(data.value)}</bdi> {getCurrencySymbol(fallbackCurrCode, lang)}
+                    </Typography>
+                )}
+            </Paper>
+        );
+    }
+    return null;
 };
 
 const CustomChartTooltip = ({ active, payload, label, lang, baseCurrCode, isQty = false, t }) => {
@@ -261,7 +393,6 @@ const GlobalDashboard = () => {
         }
     }, [userId, activeTargetCurrency]);
 
-    // 🎯 تعديل معالج تغيير العملة الموحدة لمنع إغلاق الخيار والاحتفاظ بـ Preferences في الباك إند
     const handleUnifiedCurrencyChange = async (newTargetCurr) => {
         setActiveTargetCurrency(newTargetCurr);
         localStorage.setItem('hub_active_currency', newTargetCurr);
@@ -448,17 +579,31 @@ const GlobalDashboard = () => {
     const totalTreasuryOutflow  = treasuriesList.reduce((acc, row) => acc + parseFloat(row.today_outflow || 0), 0);
     const totalTreasuryClosing  = treasuriesList.reduce((acc, row) => acc + parseFloat(row.closing_balance || 0), 0);
 
-    const totalPaidCalculated    = parseFloat(activeSummary.total_paid    || 0);
-    const totalUnpaidCalculated  = parseFloat(activeSummary.total_unpaid  || 0);
-    const totalReturnsCalculated = parseFloat(activeSummary.total_returns || 0);
+    // 🎯 استخدام القائمة المنسقة المفككة القادمة من الباك إند
+    const rawPaymentStatusBreakdown = analyticsData.paymentStatusBreakdown || [];
 
-    const formattedPieData = [
-        { name: t.statusPaid     || 'Paid',               value: totalPaidCalculated,    color: '#2e7d32' },
-        { name: t.statusUnpaid   || 'Unpaid / Due',        value: totalUnpaidCalculated,  color: '#ed6c02' },
-        { name: t.statusReturned || 'Returned / Refunded', value: totalReturnsCalculated, color: '#d32f2f' }
-    ].filter(item => item.value > 0);
+    const statusColorMap = {
+        paid: '#2e7d32',
+        unpaid: '#ed6c02',
+        returned: '#d32f2f'
+    };
 
-    const PIE_COLORS = ['#1976d2', '#2e7d32', '#ed6c02', '#9c27b0', '#00bcd4'];
+    const statusTitleMap = {
+        paid: t.statusPaid || 'Paid',
+        unpaid: t.statusUnpaid || 'Unpaid / Due',
+        returned: t.statusReturned || 'Returned / Refunded'
+    };
+
+    const formattedPieData = rawPaymentStatusBreakdown
+        .filter(item => parseFloat(item.value || 0) > 0)
+        .map(item => ({
+            ...item,
+            rawKey: item.name,
+            displayName: statusTitleMap[item.name] || item.name,
+            color: statusColorMap[item.name] || '#1976d2'
+        }));
+
+    const PIE_COLORS = ['#1976d2', '#2e7d32', '#ed6c02', '#9c27b0', '#00bcd4', '#ff9800', '#795548'];
 
     const chartAxisColor = theme.palette.text.secondary;
 
@@ -794,17 +939,17 @@ const GlobalDashboard = () => {
                 </Grid>
             </Grid>
 
-            {/* 🎯 قسم المبيعات والتحصيلات المحدث: كارت Donut Chart للمبيعات + كارت أحدث 5 مبيعات */}
+            {/* 🎯 قسم المبيعات والمدفوعات المحدث: Donut Chart بدون أرقام سفلية + أحدث المقبوضات */}
             <Grid container spacing={3} sx={{ mb: 3 }}>
                 {/* 1. Sales Collection Breakdown Donut Chart */}
                 <Grid item xs={12} md={6}>
                     <Card sx={{ height: '100%', boxShadow: '0 4px 16px rgba(0,0,0,0.04)', borderRadius: 2 }}>
                         <CardContent sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                             <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
-                                {t.salesBreakdownChartTitle || (lang === 'ar' ? 'نسب توزيع المبيعات المحصلة' : 'Sales Collection Breakdown')}
+                                {t.salesBreakdownChartTitle || (lang === 'ar' ? 'طرق الدفع' : 'Payment Methods')}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-                                {t.salesBreakdownChartSubtitle || (lang === 'ar' ? 'نسبة توزيع المبيعات بحسب طريقة تحصيل الأموال بكافة الفروع' : 'Proportional breakdown of collected sales per payment method.')}
+                                {t.salesBreakdownChartSubtitle || (lang === 'ar' ? 'توزيع المبيعات حسب طريقة الدفع المستخدمة.' : 'Distribution of sales by payment method used.')}
                             </Typography>
 
                             <Box sx={{ width: '100%', height: 210, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -829,7 +974,13 @@ const GlobalDashboard = () => {
                                                 ))}
                                             </Pie>
                                             <RechartsTooltip 
-                                                content={<CustomChartTooltip lang={lang} baseCurrCode={baseCurrCode} t={t} />} 
+                                                content={
+                                                    <CustomSalesDonutTooltip 
+                                                        lang={lang} 
+                                                        activeTargetCurrency={activeTargetCurrency} 
+                                                        fallbackCurrCode={baseCurrCode} 
+                                                    />
+                                                } 
                                                 cursor={{ fill: 'transparent' }} 
                                             />
                                         </PieChart>
@@ -837,17 +988,13 @@ const GlobalDashboard = () => {
                                 )}
                             </Box>
 
-                            <Box sx={{ mt: 'auto', pt: 1, borderTop: `1px solid ${theme.palette.divider}` }}>
+                            {/* 🎯 الإبقاء على الألوان والأسماء المنظفة فقط بدون عرض أي مبالغ مالية سفلية */}
+                            <Box sx={{ mt: 'auto', pt: 1, borderTop: `1px solid ${theme.palette.divider}`, display: 'flex', flexWrap: 'wrap', gap: 1.5, justifyContent: 'center' }}>
                                 {salesBreakdown.map((item, idx) => (
-                                    <Box key={item.name} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.3 }}>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: PIE_COLORS[idx % PIE_COLORS.length] }} />
-                                            <Typography variant="caption" fontWeight={600} sx={{ textTransform: 'capitalize' }}>
-                                                {item.name === 'cash' ? (lang === 'ar' ? 'نقداً (Cash)' : 'Cash') : item.name === 'bank' ? (lang === 'ar' ? 'تحويل بنكي' : 'Bank Transfer') : item.name}
-                                            </Typography>
-                                        </Box>
-                                        <Typography variant="caption" fontWeight={700} color={PIE_COLORS[idx % PIE_COLORS.length]}>
-                                            <bdi>{formatCurrency(item.value)}</bdi> {getCurrencySymbol(baseCurrCode, lang)}
+                                    <Box key={item.rawKey || item.name} sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                                        <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: PIE_COLORS[idx % PIE_COLORS.length] }} />
+                                        <Typography variant="caption" fontWeight={600} color="text.primary">
+                                            {formatDynamicMethodName(item.rawKey || item.name, lang)}
                                         </Typography>
                                     </Box>
                                 ))}
@@ -862,7 +1009,7 @@ const GlobalDashboard = () => {
                         <CardContent>
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                                 <Typography variant="subtitle1" fontWeight={700}>
-                                    {t.recentSalesTitle || (lang === 'ar' ? 'أحدث المبيعات والتحصيلات' : 'Recent Sales & Receipts')}
+                                    {t.recentSalesTitle || (lang === 'ar' ? 'أحدث المقبوضات والمدفوعات' : 'Recent Receipts')}
                                 </Typography>
                                 <Button size="small" onClick={() => navigate('/payments')}>
                                     {t.viewAll || 'View All'}
@@ -903,7 +1050,12 @@ const GlobalDashboard = () => {
                                                             <bdi>{formatCurrency(sale.amount)}</bdi> {getCurrencySymbol(sale.display_currency || baseCurrCode, lang)}
                                                         </TableCell>
                                                         <TableCell align="center">
-                                                            <Chip label={sale.payment_method || 'cash'} size="small" variant="outlined" sx={{ fontSize: '10.5px', textTransform: 'capitalize', fontWeight: 600, height: 20 }} />
+                                                            <Chip 
+                                                                label={formatDynamicMethodName(sale.payment_method, lang)} 
+                                                                size="small" 
+                                                                variant="outlined" 
+                                                                sx={{ fontSize: '10.5px', fontWeight: 600, height: 20 }} 
+                                                            />
                                                         </TableCell>
                                                     </TableRow>
                                                 ))
@@ -984,20 +1136,28 @@ const GlobalDashboard = () => {
                                                     <Cell key={`cell-${index}`} fill={entry.color} />
                                                 ))}
                                             </Pie>
-                                            <RechartsTooltip content={<CustomChartTooltip lang={lang} baseCurrCode={baseCurrCode} t={t} />} cursor={{ fill: 'transparent' }} />
+                                            <RechartsTooltip 
+                                                content={
+                                                    <CustomCollectionDonutTooltip 
+                                                        lang={lang} 
+                                                        activeTargetCurrency={activeTargetCurrency} 
+                                                        fallbackCurrCode={baseCurrCode}
+                                                        t={t}
+                                                    />
+                                                } 
+                                                cursor={{ fill: 'transparent' }} 
+                                            />
                                         </PieChart>
                                     </ResponsiveContainer>
                                 )}
                             </Box>
-                            <Box sx={{ mt: 'auto', pt: 1, borderTop: `1px solid ${theme.palette.divider}` }}>
+                            {/* 🎯 الإبقاء على الألوان والأسماء فقط بدون إظهار أي أرقام سفلية */}
+                            <Box sx={{ mt: 'auto', pt: 1, borderTop: `1px solid ${theme.palette.divider}`, display: 'flex', flexWrap: 'wrap', gap: 1.5, justifyContent: 'center' }}>
                                 {formattedPieData.map((item) => (
-                                    <Box key={item.name} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.3 }}>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                            <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: item.color }} />
-                                            <Typography variant="caption" fontWeight={600}>{item.name}</Typography>
-                                        </Box>
-                                        <Typography variant="caption" fontWeight={700} color={item.color}>
-                                            <bdi>{formatCurrency(item.value)}</bdi> {getCurrencySymbol(baseCurrCode, lang)}
+                                    <Box key={item.rawKey || item.name} sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                                        <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: item.color }} />
+                                        <Typography variant="caption" fontWeight={600} color="text.primary">
+                                            {item.displayName || item.name}
                                         </Typography>
                                     </Box>
                                 ))}
