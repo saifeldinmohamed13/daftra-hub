@@ -3,12 +3,7 @@ node_modules/
 frontend/node_modules/
 backend/node_modules/
 
-# 2. إخفاء ملفات المتغيرات السرية والحساسة (Secrets)
-.env
-backend/.env
-frontend/.env
-
-# 3. إخفاء مجلدات البيلد والـ Output
+# 2. إخفاء مجلدات البيلد والـ Output
 dist/
 build/
 frontend/dist/
